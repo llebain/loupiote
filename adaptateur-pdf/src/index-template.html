@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adaptateur PDF — police Luciole</title>
+<!--
+  Outil autonome, hors ligne. Aucune requete reseau a l'execution.
+  Bibliotheques embarquees (voir README.md pour licences et versions exactes) :
+    pdf.js (Apache-2.0) - Mozilla
+    jsPDF (MIT)
+    tesseract.js + tesseract.js-core (Apache-2.0)
+    police Luciole (CC BY 4.0) - Laurent Bourcellier & Jonathan Perez / CTRDV
+    liste de frequence francaise hermitdave/FrequencyWords (MIT)
+  Documentation : https://www.luciole-vision.com/ (credit uniquement, jamais charge)
+-->
+<style>
+__CSS__
+</style>
+</head>
+<body>
+<header class="app-header">
+  <h1>Adaptateur PDF — police Luciole</h1>
+  <p>Remet en page un document PDF en gros caractères (police Luciole, adaptée basse vision) pour une lecture confortable et une exportation en PDF texte véritable.</p>
+</header>
+
+<main>
+  <nav id="panel-reglages" aria-label="Réglages d'affichage">
+    <fieldset>
+      <legend>Dépôt du document</legend>
+      <div id="dropzone" tabindex="0" role="button" aria-label="Déposer un fichier PDF ici, ou appuyer sur Entrée pour choisir un fichier">
+        <p>Glissez-déposez un PDF ici</p>
+        <p>ou</p>
+        <button type="button" id="btn-choisir-fichier">Choisir un fichier PDF</button>
+        <input type="file" id="input-fichier" accept="application/pdf" class="visually-hidden">
+        <p id="mention-local">Le fichier reste sur votre ordinateur : rien n'est envoyé sur internet.</p>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Texte</legend>
+      <label for="reglage-taille">Taille du texte : <output id="valeur-taille">24</output> pt</label>
+      <input type="range" id="reglage-taille" min="20" max="48" step="1" value="24">
+      <p style="font-weight:normal;">20 pt minimum : hauteur de capitale mesurée à 5,4 mm, au-dessus du seuil de 0,5 cm.</p>
+
+      <label for="reglage-couleur">Couleur du document</label>
+      <select id="reglage-couleur">
+        <option value="couleur" selected>Conserver les couleurs d'origine</option>
+        <option value="nb">Noir et blanc</option>
+      </select>
+
+      <label for="reglage-interligne">Interligne</label>
+      <select id="reglage-interligne">
+        <option value="1.5" selected>1,5 (recommandé)</option>
+        <option value="1.75">1,75</option>
+        <option value="2">2</option>
+      </select>
+
+      <label for="reglage-espacement-car">Espacement des caractères</label>
+      <select id="reglage-espacement-car">
+        <option value="normal" selected>Normal</option>
+        <option value="0.05em">Légèrement augmenté (+0,05 em)</option>
+        <option value="0.1em">Augmenté (+0,1 em)</option>
+      </select>
+
+      <label for="reglage-espacement-mot">Espacement des mots</label>
+      <select id="reglage-espacement-mot">
+        <option value="normal" selected>Normal</option>
+        <option value="elargi">Élargi</option>
+      </select>
+    </fieldset>
+
+    <fieldset>
+      <legend>Affichage</legend>
+      <label for="reglage-contraste">Contraste</label>
+      <select id="reglage-contraste">
+        <option value="noir-blanc" selected>Noir sur blanc</option>
+        <option value="blanc-noir">Blanc sur noir</option>
+        <option value="jaune-bleu">Jaune sur bleu marine</option>
+        <option value="noir-creme">Noir sur crème</option>
+      </select>
+
+      <label for="reglage-orientation">Orientation</label>
+      <select id="reglage-orientation">
+        <option value="portrait" selected>Portrait</option>
+        <option value="paysage">Paysage</option>
+      </select>
+
+      <label for="reglage-images">Images</label>
+      <select id="reglage-images">
+        <option value="conserver" selected>Conserver</option>
+        <option value="masquer">Masquer</option>
+      </select>
+
+      <label for="reglage-double-page">Ce document est une double page (deux pages scannées côte à côte)</label>
+      <select id="reglage-double-page">
+        <option value="auto" selected>Détection automatique</option>
+        <option value="oui">Oui, toujours découper</option>
+        <option value="non">Non, jamais découper</option>
+      </select>
+
+      <p style="margin-top:0.8em;">
+        <input type="checkbox" id="reglage-ignorer-pages-garde" checked style="width:auto;min-width:24px;min-height:24px;vertical-align:middle;">
+        <label for="reglage-ignorer-pages-garde" style="display:inline;font-weight:normal;">Ignorer les pages de garde et de copyright (détection automatique)</label>
+      </p>
+    </fieldset>
+
+    <button type="button" id="btn-reinitialiser" class="secondary">Réinitialiser aux valeurs recommandées</button>
+  </nav>
+
+  <div id="zone-contenu">
+    <div id="barre-action">
+      <button type="button" id="btn-telecharger" disabled>Télécharger le PDF adapté</button>
+      <button type="button" id="btn-imprimer" disabled>Imprimer</button>
+      <span id="compteur-pages" aria-live="polite"></span>
+    </div>
+    <div id="progression" role="status" aria-live="polite" data-active="false"></div>
+    <div id="messages" aria-live="polite"></div>
+    <div id="apercu"></div>
+  </div>
+</main>
+
+<footer class="mention-legale">
+  <p><strong>Usage réservé.</strong> Cet outil est destiné exclusivement à l'adaptation de documents en vue d'une consultation strictement personnelle par une personne en situation de handicap, au sens de l'exception au droit d'auteur prévue à l'article L.122-5, 7° du Code de la propriété intellectuelle. Toute autre utilisation — diffusion, partage, mise à disposition de tiers, usage collectif ou exploitation commerciale des documents adaptés — est exclue. Les œuvres adaptées demeurent protégées par le droit d'auteur de leurs ayants droit. Aucun document n'est transmis : le traitement est intégralement local, sur votre ordinateur.</p>
+  <p>Police Luciole © Laurent Bourcellier &amp; Jonathan Perez, projet porté par le CTRDV — Licence Creative Commons Attribution 4.0 International (CC BY 4.0). <a href="https://www.luciole-vision.com/" target="_blank" rel="noopener">luciole-vision.com</a></p>
+</footer>
+
+<script>
+window.ASSETS = __ASSETS_JSON__;
+</script>
+<script>
+__JS_LIB_LOADER__
+</script>
+<script>
+__JS_EXTRACT_NATIVE__
+</script>
+<script>
+__JS_OCR_PIPELINE__
+</script>
+<script>
+__JS_LAYOUT_ENGINE__
+</script>
+<script>
+__JS_PDF_EXPORT__
+</script>
+<script>
+__JS_MAIN__
+</script>
+</body>
+</html>

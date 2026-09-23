@@ -1,0 +1,221 @@
+/* Interface de l'adaptateur PDF -- sobre, fort contraste, utilisable par une
+   personne malvoyante : corps >= 18px, cibles >= 44px, focus visible. */
+:root {
+  --bg: #ffffff;
+  --fg: #10121a;
+  --accent: #1a4fd6;
+  --accent-fg: #ffffff;
+  --border: #4b4f5a;
+  --danger-bg: #5c0a0a;
+  --danger-fg: #ffffff;
+  --panel-bg: #f2f3f7;
+  --focus: #ff8a00;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, "Segoe UI", Arial, sans-serif;
+  font-size: 18px;
+  line-height: 1.5;
+}
+
+body { display: flex; flex-direction: column; min-height: 100vh; }
+
+a { color: var(--accent); }
+
+h1 { font-size: 1.6em; margin: 0.4em 0; }
+h2 { font-size: 1.3em; }
+
+button, select, input[type="range"] {
+  font: inherit;
+  min-height: 44px;
+  min-width: 44px;
+}
+
+button {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border: 2px solid transparent;
+  border-radius: 8px;
+  padding: 0.5em 1.1em;
+  cursor: pointer;
+}
+button.secondary {
+  background: #ffffff;
+  color: var(--accent);
+  border: 2px solid var(--accent);
+}
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+:focus-visible {
+  outline: 4px solid var(--focus);
+  outline-offset: 2px;
+}
+
+header.app-header {
+  padding: 1em 1.2em;
+  border-bottom: 2px solid var(--border);
+}
+
+main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 0;
+}
+@media (max-width: 900px) {
+  main { grid-template-columns: 1fr; }
+}
+
+#panel-reglages {
+  background: var(--panel-bg);
+  border-right: 2px solid var(--border);
+  padding: 1.2em;
+  overflow-y: auto;
+}
+#panel-reglages fieldset {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 0 0 1em 0;
+  padding: 0.8em;
+}
+#panel-reglages legend { font-weight: bold; padding: 0 0.4em; }
+#panel-reglages label {
+  display: block;
+  margin: 0.6em 0 0.2em;
+  font-weight: 600;
+}
+#panel-reglages select,
+#panel-reglages input[type="range"] {
+  width: 100%;
+}
+
+#zone-contenu {
+  padding: 1.2em;
+  overflow-y: auto;
+}
+
+#dropzone {
+  border: 3px dashed var(--accent);
+  border-radius: 12px;
+  padding: 3em 1.5em;
+  text-align: center;
+  background: #eef2ff;
+}
+#dropzone.dragover { background: #dbe4ff; }
+#dropzone p { font-size: 1.1em; }
+#mention-local {
+  font-weight: 600;
+  margin-top: 0.6em;
+}
+
+#barre-action {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6em;
+  align-items: center;
+  margin: 1em 0;
+  padding: 0.8em;
+  background: var(--panel-bg);
+  border-radius: 8px;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+#compteur-pages { font-weight: 600; }
+
+#progression {
+  min-height: 1.4em;
+  font-weight: 600;
+}
+#progression[data-active="true"] { color: #7a4b00; }
+
+.erreur {
+  background: var(--danger-bg);
+  color: var(--danger-fg);
+  border-radius: 8px;
+  padding: 1em;
+  margin: 1em 0;
+  font-weight: 600;
+}
+.avertissement {
+  background: #fff3cd;
+  color: #4a3500;
+  border: 1px solid #d8b45c;
+  border-radius: 8px;
+  padding: 0.8em 1em;
+  margin: 0.6em 0;
+}
+
+#apercu {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.2em;
+  overflow-x: auto;
+}
+.page-apercu {
+  position: relative;
+  background: #ffffff;
+  box-shadow: 0 1px 6px rgba(0,0,0,0.3);
+  border: 1px solid #ccc;
+}
+.page-apercu .ligne {
+  position: absolute;
+  white-space: pre;
+  font-family: "Luciole", sans-serif;
+}
+.page-apercu img.image-apercu {
+  position: absolute;
+}
+/* ADDENDUM 6, Z4.4 : moteur de mise en page par blocs -- encadres et
+   tableaux reconstruits depuis le PDF source. Rectangles de fond/bordure
+   uniquement ; le texte (.ligne) est rendu a plat par-dessus, en
+   coordonnees absolues deja calculees par 03-layout-engine.js. */
+.page-apercu .bloc-boite {
+  position: absolute;
+  border-style: solid;
+  border-width: 2px;
+  border-radius: 10px;
+  box-sizing: border-box;
+}
+.page-apercu .cellule-tableau {
+  position: absolute;
+  border-style: solid;
+  border-width: 1px;
+  box-sizing: border-box;
+}
+.numero-page {
+  font-size: 0.9em;
+  color: #444;
+}
+
+/* Mention legale -- ADDENDUM 2 (section J) : vrai texte, jamais une image,
+   jamais aria-hidden, jamais masque, >=14px, contraste eleve, presente en
+   permanence (ecran d'accueil ET apres traitement). */
+footer.mention-legale {
+  border-top: 2px solid var(--border);
+  padding: 0.8em 1.2em;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #1a1c22;
+  background: #eceef3;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media print {
+  header.app-header, #panel-reglages, #barre-action, #dropzone, footer.mention-legale { display: none; }
+  .page-apercu { box-shadow: none; border: none; page-break-after: always; }
+}
