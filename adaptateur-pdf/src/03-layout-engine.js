@@ -67,11 +67,46 @@
     };
   }
 
+  // v0.3, lot 1 (E9, decision du 22/09/2026) : AUCUN italique, nulle part.
+  // L'italique reste capte a l'extraction (run.italic, information
+  // conservee dans le modele) mais n'est jamais rendu : italique -> romain,
+  // gras-italique -> gras. Seul point de passage de tous les rendus
+  // (apercu, export, mesure), donc la regle ne peut pas diverger.
   function styleForRun(run) {
-    if (run.bold && run.italic) return 'bolditalic';
-    if (run.bold) return 'bold';
-    if (run.italic) return 'italic';
-    return 'normal';
+    return run.bold ? 'bold' : 'normal';
+  }
+
+  // v0.3 (E5, defaut) -- en mode Noir & Blanc, ce que la couleur signalait
+  // DANS un bloc (terminaison, graphème, mot mis en evidence) est marque
+  // par du gras, ou par un souligne si le run est deja gras. « Signalait » =
+  // run d'une couleur franche (non grise) DIFFERENTE de la couleur dominante
+  // du bloc : un titre entierement colore n'est pas marque (la couleur y est
+  // decorative, pas distinctive). Decision d'affichage : les runs source ne
+  // sont pas modifies, une copie est rendue.
+  function isChromatic(c) {
+    if (!c) return false;
+    const mx = Math.max(c[0], c[1], c[2]), mn = Math.min(c[0], c[1], c[2]);
+    return mx - mn > 40;
+  }
+  function sameColor(a, b) {
+    if (!a && !b) return true;
+    if (!a || !b) return false;
+    return Math.abs(a[0] - b[0]) < 8 && Math.abs(a[1] - b[1]) < 8 && Math.abs(a[2] - b[2]) < 8;
+  }
+  function runsForDisplay(runs, settings) {
+    if (!runs || settings.colorMode !== 'nb') return runs;
+    const weights = [];
+    for (const r of runs) {
+      const n = (r.text || '').replace(/\s/g, '').length;
+      const w = weights.find((x) => sameColor(x.color, r.color));
+      if (w) w.n += n; else weights.push({ color: r.color, n });
+    }
+    weights.sort((a, b) => b.n - a.n);
+    const dominant = weights.length ? weights[0].color : null;
+    return runs.map((r) => {
+      if (!isChromatic(r.color) || sameColor(r.color, dominant) || !(r.text || '').trim()) return r;
+      return r.bold ? { ...r, underline: true } : { ...r, bold: true };
+    });
   }
 
   function applySpacingToWidth(width, text, settings) {
@@ -99,15 +134,61 @@
     return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
   }
 
+  // v0.3, lot 1 (W1) -- decoupe en MOTS, pas en tokens par run. Avant, la
+  // tokenisation se faisait run par run : un mot fait de deux runs accoles
+  // sans espace (lettre ou graphème colore en debut de mot, terminaison
+  // coloree accolee au radical) donnait deux tokens independants, et le
+  // retour a la ligne -- ou le saut de page -- pouvait tomber ENTRE les
+  // deux (« E » en fin de page 1, « xemple » en tete de page 2). Un mot est
+  // desormais une suite de morceaux (un par run) insecable ; seuls les
+  // blancs coupent.
+  //
+  // v0.3, lot 1 (R3) -- dernier recours : un mot plus large que la ligne a
+  // lui seul est coupe entre deux caracteres plutot que de deborder du
+  // cadre (texte coupe au bord de la page ou de la cellule). Ne se produit
+  // qu'au-dela de la largeur disponible, jamais pour un mot qui tient.
   function wrapRuns(runs, maxWidth, sizePt, measurer, settings) {
-    // Tokenise en mots (avec l'espace precedent conserve) par run. Conserve
-    // couleur et barre (ADDENDUM 6, Z5) : sans ceci, la mise en forme
-    // extraite par 01-extract-native.js est perdue au moment du reflow.
-    const tokens = [];
+    const words = [];
+    let cur = null;
     for (const run of runs) {
       const style = styleForRun(run);
-      const parts = run.text.split(/(\s+)/).filter((p) => p !== '');
-      for (const part of parts) tokens.push({ text: part, style, color: run.color, strikethrough: run.strikethrough });
+      const parts = (run.text || '').split(/(\s+)/).filter((p) => p !== '');
+      for (const part of parts) {
+        const piece = { text: part, style, color: run.color, strikethrough: run.strikethrough, underline: run.underline };
+        if (/^\s+$/.test(part)) { words.push({ space: true, pieces: [piece] }); cur = null; }
+        else if (cur) cur.pieces.push(piece);
+        else { cur = { space: false, pieces: [piece] }; words.push(cur); }
+      }
+    }
+    const measurePiece = (pc) => applySpacingToWidth(measurer.widthOf(pc.text, sizePt, pc.style), pc.text, settings);
+    for (const w of words) {
+      for (const pc of w.pieces) pc.width = measurePiece(pc);
+      w.width = w.pieces.reduce((a, pc) => a + pc.width, 0);
+    }
+
+    // Coupe un mot trop large en fragments qui tiennent chacun dans `max`
+    // (au moins un caractere par fragment).
+    function breakWord(word, max) {
+      const out = [];
+      let frag = { space: false, pieces: [], width: 0 };
+      for (const pc of word.pieces) {
+        let acc = '';
+        for (const ch of pc.text) {
+          const trial = { ...pc, text: acc + ch };
+          const wTrial = measurePiece(trial);
+          if (frag.width + wTrial > max && (frag.pieces.length || acc)) {
+            if (acc) { const p2 = { ...pc, text: acc }; p2.width = measurePiece(p2); frag.pieces.push(p2); frag.width += p2.width; }
+            out.push(frag);
+            frag = { space: false, pieces: [], width: 0 };
+            acc = ch;
+          } else {
+            acc += ch;
+          }
+        }
+        if (acc) { const p2 = { ...pc, text: acc }; p2.width = measurePiece(p2); frag.pieces.push(p2); frag.width += p2.width; }
+      }
+      if (frag.pieces.length) out.push(frag);
+      return out;
     }
 
     const lines = [];
@@ -116,39 +197,48 @@
 
     function pushLine() {
       // Retire les espaces de fin de ligne
-      while (current.length && /^\s+$/.test(current[current.length - 1].text)) current.pop();
+      while (current.length && current[current.length - 1].space) {
+        currentWidth -= current[current.length - 1].width;
+        current.pop();
+      }
       if (current.length) lines.push(current);
       current = [];
       currentWidth = 0;
     }
 
-    for (const tok of tokens) {
-      const rawW = measurer.widthOf(tok.text, sizePt, tok.style);
-      const w = applySpacingToWidth(rawW, tok.text, settings);
-      if (/^\s+$/.test(tok.text)) {
+    for (const word of words) {
+      if (word.space) {
         if (current.length === 0) continue; // pas d'espace en debut de ligne
-        current.push({ text: tok.text, style: tok.style, color: tok.color, strikethrough: tok.strikethrough, width: w });
-        currentWidth += w;
+        current.push(word);
+        currentWidth += word.width;
         continue;
       }
-      if (currentWidth + w > maxWidth && current.length > 0) {
-        pushLine();
+      // Tolerance d'un centieme de point : les largeurs de colonne sont des
+      // sommes/differences de flottants, un mot mesure exactement a la
+      // largeur de sa colonne ne doit pas etre coupe pour 1e-13 pt.
+      const fragments = word.width > maxWidth + 0.01 ? breakWord(word, maxWidth) : [word];
+      for (const frag of fragments) {
+        if (currentWidth + frag.width > maxWidth + 0.01 && current.length > 0) pushLine();
+        current.push(frag);
+        currentWidth += frag.width;
       }
-      current.push({ text: tok.text, style: tok.style, color: tok.color, strikethrough: tok.strikethrough, width: w });
-      currentWidth += w;
     }
     pushLine();
 
     // Fusionne les segments consecutifs de meme style en une chaine (pour le
     // rendu), tout en gardant la largeur totale de ligne.
-    return lines.map((segs) => {
+    return lines.map((ws) => {
       const merged = [];
-      for (const s of segs) {
-        const last = merged[merged.length - 1];
-        if (last && last.style === s.style && colorsSame(last.color, s.color) && !!last.strikethrough === !!s.strikethrough) {
-          last.text += s.text; last.width += s.width;
+      for (const w of ws) {
+        for (const s of w.pieces) {
+          const last = merged[merged.length - 1];
+          if (last && last.style === s.style && colorsSame(last.color, s.color) &&
+              !!last.strikethrough === !!s.strikethrough && !!last.underline === !!s.underline) {
+            last.text += s.text; last.width += s.width;
+          } else {
+            merged.push({ text: s.text, style: s.style, color: s.color, strikethrough: s.strikethrough, underline: s.underline, width: s.width });
+          }
         }
-        else merged.push({ ...s });
       }
       const totalWidth = merged.reduce((a, s) => a + s.width, 0);
       return { segments: merged, width: totalWidth };
@@ -192,7 +282,7 @@
       if (block.type === 'needs-ocr') continue;  // traite en amont (remplace par blocs OCR)
 
       if (block.type === 'image') {
-        if (!settings.showImages) continue;
+        if (!settings.showImages || block.small) continue;
         if (!block.dataUrl || !block.width || !block.height) continue;
         const w = usableWidth;
         const h = w * (block.height / block.width);
@@ -208,7 +298,7 @@
       const lineGap = isHeading ? sizePt * settings.lineHeight : bodyLineGap;
       const style = isHeading ? 'bold' : (isListItem ? 'normal' : null);
 
-      let runs = block.runs;
+      let runs = runsForDisplay(block.runs, settings);
       let indent = 0;
       if (isListItem) {
         indent = sizePt * 1.2;
@@ -484,12 +574,16 @@
     for (const block of blocksHere) {
       const isHeading = block.type === 'h1' || block.type === 'h2' || block.type === 'h3';
       const sizePt = isHeading ? bodySize * HEADING_FACTORS[block.type] : bodySize;
-      for (const run of block.runs || []) {
+      // v0.3 (W1) : un mot peut s'etendre sur plusieurs runs accoles (cf.
+      // wrapRuns) -- sa largeur est la somme de ses morceaux.
+      let wordW = 0;
+      for (const run of runsForDisplay(block.runs || [], settings)) {
         const style = styleForRun(run);
-        const parts = (run.text || '').split(/\s+/).filter((p) => p !== '');
+        const parts = (run.text || '').split(/(\s+)/).filter((p) => p !== '');
         for (const part of parts) {
-          const w = applySpacingToWidth(measurer.widthOf(part, sizePt, style), part, settings);
-          if (w > max) max = w;
+          if (/^\s+$/.test(part)) { wordW = 0; continue; }
+          wordW += applySpacingToWidth(measurer.widthOf(part, sizePt, style), part, settings);
+          if (wordW > max) max = wordW;
         }
       }
     }
@@ -527,7 +621,22 @@
     const lines = [];
     const images = [];
     let y = startY;
+    // v0.3 (E6) : icone (petite image, mascotte) en attente d'etre posee a
+    // gauche du bloc de texte qui la suit.
+    let pendingIcon = null;
     for (const block of blocksHere) {
+      if (block.type === 'image' && block.small) {
+        if (!settings.showImages || !block.dataUrl || !block.width || !block.height) continue;
+        // Icone a ~1,5 x le corps, ratio conserve, jamais plus large que la
+        // moitie du conteneur.
+        let h = 1.5 * bodySize;
+        let w = h * (block.width / block.height);
+        if (w > width / 2) { w = width / 2; h = w * (block.height / block.width); }
+        if (pendingIcon) y = Math.max(y, pendingIcon.y + pendingIcon.height + paraGap);
+        pendingIcon = { y, x: 0, width: w, height: h, src: block.dataUrl };
+        images.push(pendingIcon);
+        continue;
+      }
       if (block.type === 'image') {
         // ADDENDUM 6, Z12, C1 -- correctif du 20/09/2026 (cause racine R3
         // du cadrage Z12) : cette ligne disait "images traitees a part par
@@ -567,11 +676,26 @@
       const isListItem = block.type === 'li';
       const sizePt = isHeading ? bodySize * HEADING_FACTORS[block.type] : bodySize;
       const lineGap = isHeading ? sizePt * settings.lineHeight : bodyLineGap;
-      let runs = block.runs;
+      let runs = runsForDisplay(block.runs, settings);
       let indent = 0;
       if (isListItem) {
         indent = sizePt * 1.2;
         runs = [{ text: '•  ', bold: false, italic: false }, ...runs];
+      }
+      let iconBottom = null;
+      if (pendingIcon) {
+        // Libelle a droite de son icone, premiere ligne alignee sur elle --
+        // sauf si le mot le plus long du libelle n'y tient plus (colonne
+        // etroite) : l'icone reste alors seule au-dessus, sans couper de mot.
+        const iconIndent = pendingIcon.width + 0.3 * bodySize;
+        if (widestTokenWidth([block], bodySize, measurer, settings) <= width - indent - iconIndent) {
+          indent += iconIndent;
+          y = pendingIcon.y;
+          iconBottom = pendingIcon.y + pendingIcon.height;
+        } else {
+          y = Math.max(y, pendingIcon.y + pendingIcon.height + 0.25 * bodySize);
+        }
+        pendingIcon = null;
       }
       const wrapped = wrapRuns(runs, width - indent, sizePt, measurer, settings);
       // ADDENDUM 6, Z12, F1 -- `isLastLine` marque la derniere ligne de CE
@@ -584,8 +708,10 @@
         lines.push({ y: y + lineGap * 0.8, x: indent, segments: l.segments, sizePt, isHeading, isListItem, isLastLine: wi === wrapped.length - 1 });
         y += lineGap;
       });
+      if (iconBottom !== null) y = Math.max(y, iconBottom);
       y += paraGap;
     }
+    if (pendingIcon) y = Math.max(y, pendingIcon.y + pendingIcon.height + paraGap);
     return { lines, images, height: Math.max(0, y - startY - paraGap) };
   }
 
@@ -598,7 +724,7 @@
     // copyright en marge) masque par defaut -- decision d'affichage, pas
     // d'extraction (le bloc existe toujours dans pageBlocks, seulement
     // ecarte ici). Pas encore de reglage pour le reafficher (prevu au plan).
-    pageBlocks = pageBlocks.filter((b) => !b.secondary);
+    pageBlocks = pageBlocks.filter((b) => !b.secondary && !b.duplicate);
     const pageHeightSrc = pageSizeForPage.height;
 
     // ADDENDUM 6, Z4.4sexies -- correctif du 20/09/2026 (remonte par Loic :
@@ -620,8 +746,20 @@
     const pageWidthOut = dims.width;
     const widthRatio = pageWidthOut / (pageSizeForPage.width || pageWidthOut);
 
-    const boxes = (pageShapesForPage.boxes || []).filter((b) => (b.x1 - b.x0) > 20 && (b.y1 - b.y0) > 20);
-    const tables = detectTables(pageShapesForPage.lines, boxes);
+    // v0.3 : tableaux detectes UNE fois, a l'extraction (avec les
+    // contraintes S6 et l'exclusion des lignes de decoupe, qui ont besoin
+    // du texte de la page) ; recalcul local seulement pour une extraction
+    // anterieure qui ne les fournirait pas.
+    // v0.3 (E1) : regions d'exemplaires en double -- leurs boites et
+    // tableaux ne sont pas rendus (leur texte est deja ecarte, cf. filtre
+    // `duplicate` ci-dessus).
+    const hidden = (pageShapesForPage.regions || []).filter((r) => r.duplicate);
+    const inHidden = (b) => hidden.some((r) => {
+      const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
+      return cx >= r.x0 && cx < r.x1 && cy > r.y0 && cy <= r.y1;
+    });
+    const boxes = (pageShapesForPage.boxes || []).filter((b) => (b.x1 - b.x0) > 20 && (b.y1 - b.y0) > 20 && !inHidden(b));
+    const tables = (pageShapesForPage.tables || detectTables(pageShapesForPage.lines, boxes)).filter((t) => !inHidden(t));
     // Exclut des "boites" celles CONTENUES dans un tableau deja detecte (pas
     // seulement celles qui en epousent exactement les bords) : un fond
     // colore de colonne d'en-tete (ex. la colonne "Noms/Verbes/..." de
@@ -756,7 +894,7 @@
         // srcBottomY/srcLeftX (ADDENDUM 6, Z12, A2) : bbox source COMPLETE
         // (pas seulement le sommet), necessaire au regroupement par bande
         // verticale de l'ordre de lecture, cf. plus bas.
-        srcTopY: box.y1, srcBottomY: box.y0, srcLeftX: box.x0,
+        srcTopY: box.y1, srcBottomY: box.y0, srcLeftX: box.x0, srcCenterX: (box.x0 + box.x1) / 2,
         lines: lines.map((l) => ({ ...l, x: l.x + boxPadding })),
         // ADDENDUM 6, Z12, C1 : images de la boite, memes coordonnees
         // relatives + rembourrage que les lignes ci-dessus.
@@ -771,51 +909,61 @@
     // etroite (Z8) sans revegetifier que le total tient encore sur la page
     // faisait deborder le tableau au-dela de la marge droite.).
     const usableWidthForTables = pageWidthOut - 2 * MARGIN_MM * MM_TO_PT;
-    tables.forEach((table, ti) => {
-      const rect = toOutputRect(table, widthRatio, pageHeightSrc);
-      const propColXs = table.colBounds.map((x) => x * widthRatio);
-      const numCols = propColXs.length - 1;
+    const landscapeDims = pageDimsPt('paysage');
+    const usableWidthLandscape = landscapeDims.width - 2 * MARGIN_MM * MM_TO_PT;
+    const consumedTitleBlocks = new Set();
 
+    const cellText = (cell) => cell.blocks.map((b) => (b.runs || []).map((r) => r.text || '').join('')).join(' ').replace(/\s+/g, ' ').trim();
+
+    // Construit un item 'table' a partir de la grille source `grid`
+    // (tableCells[ti]) restreinte aux colonnes `cols`, dans la largeur
+    // `maxWidth`, avec les reglages `tSettings` (corps propre possible,
+    // cf. E4). `evenWidths` : colonnes de largeur egale (groupes paysage)
+    // plutot que proportionnelles a la source.
+    function buildTableItem(table, grid, cols, tSettings, maxWidth, evenWidths) {
+      const cp = 0.35 * tSettings.fontSize;
+      const numCols = cols.length;
       // Largeur minimale par colonne = son mot le plus long, sur toutes ses
       // cellules (voir widestTokenWidth) -- une colonne ne peut jamais etre
       // plus etroite sans faire deborder son propre texte sur la voisine.
-      const minWidths = [];
-      const propWidths = [];
-      for (let c = 0; c < numCols; c++) {
+      const minWidths = cols.map((c) => {
         let colMax = 0;
-        for (let r = 0; r < tableCells[ti].length; r++) {
-          colMax = Math.max(colMax, widestTokenWidth(tableCells[ti][r][c].blocks, settings.fontSize, measurer, settings));
+        for (let r = 0; r < grid.length; r++) {
+          colMax = Math.max(colMax, widestTokenWidth(grid[r][c].blocks, tSettings.fontSize, measurer, tSettings));
         }
-        minWidths.push(colMax + 2 * cellPadding);
-        propWidths.push(propColXs[c + 1] - propColXs[c]);
-      }
-      const rawWidths = propWidths.map((w, c) => Math.max(w, minWidths[c]));
+        return colMax + 2 * cp;
+      });
+      const baseWidths = evenWidths
+        ? cols.map(() => maxWidth / numCols)
+        : cols.map((c) => (table.colBounds[c + 1] - table.colBounds[c]) * widthRatio);
+      const rawWidths = baseWidths.map((w, i) => Math.max(w, minWidths[i]));
       const totalRaw = rawWidths.reduce((a, w) => a + w, 0);
 
       let finalWidths = rawWidths;
-      if (totalRaw > usableWidthForTables) {
+      if (totalRaw > maxWidth) {
         // Retire l'exces aux colonnes qui ont de la marge par rapport a LEUR
         // PROPRE minimum (jamais en dessous), au prorata de cette marge.
-        // Si meme la somme des minimums ne rentre pas (totalSlack ne suffit
-        // pas a absorber tout l'exces), reste sur les minimums : deborde
-        // legerement en dernier recours plutot que de couper un mot --
-        // aucun des 3 documents cible n'a rencontre ce cas extreme a ce jour.
-        const slack = rawWidths.map((w, c) => w - minWidths[c]);
-        const totalSlack = slack.reduce((a, s) => a + s, 0);
-        const overflow = totalRaw - usableWidthForTables;
+        const slack = rawWidths.map((w, i) => w - minWidths[i]);
+        const totalSlack = slack.reduce((a, x) => a + x, 0);
+        const overflow = totalRaw - maxWidth;
         if (totalSlack > 0) {
           const reducible = Math.min(overflow, totalSlack);
-          finalWidths = rawWidths.map((w, c) => w - (slack[c] / totalSlack) * reducible);
+          finalWidths = rawWidths.map((w, i) => w - (slack[i] / totalSlack) * reducible);
         }
+        // v0.3, lot 1 (R3) -- si meme la somme des minimums ne tient pas, le
+        // tableau n'est plus autorise a deborder de la page (texte coupe au
+        // bord dans le PDF) : colonnes ramenees a la largeur disponible au
+        // prorata, le mot trop long est coupe dans sa cellule (wrapRuns).
+        const total = finalWidths.reduce((a, w) => a + w, 0);
+        if (total > maxWidth + 0.01) finalWidths = finalWidths.map((w) => w * (maxWidth / total));
       }
 
       // Le tableau demarre a la marge de page, pas a sa position source
       // proportionnelle : une fois les largeurs de colonne ajustees, la
       // position d'origine n'a plus de sens fiable a preserver.
       const marginX = MARGIN_MM * MM_TO_PT;
-      let colXsOut = [marginX];
-      for (let c = 0; c < numCols; c++) colXsOut.push(colXsOut[c] + finalWidths[c]);
-      rect.x = marginX;
+      const colXsOut = [marginX];
+      for (let i = 0; i < numCols; i++) colXsOut.push(colXsOut[i] + finalWidths[i]);
 
       // ADDENDUM 6, Z12, E2 -- boites de fond COLOREES de ce tableau (ex. le
       // fond orange de la colonne d'en-tete "Noms/Verbes/..."), retenues
@@ -838,42 +986,124 @@
 
       let rowY = 0;
       const rows = [];
-      for (let r = 0; r < tableCells[ti].length; r++) {
+      for (let r = 0; r < grid.length; r++) {
         const cellsOut = [];
         let rowHeight = 0;
-        for (let c = 0; c < tableCells[ti][r].length; c++) {
-          const cell = tableCells[ti][r][c];
-          const cellWidth = colXsOut[c + 1] - colXsOut[c];
-          const innerWidth = Math.max(30, cellWidth - 2 * cellPadding);
-          const { lines, images, height } = reflowBlocksInWidth(cell.blocks, innerWidth, settings, measurer, cellPadding, maxImageHeight);
-          rowHeight = Math.max(rowHeight, height + 2 * cellPadding);
+        cols.forEach((c, i) => {
+          const cell = grid[r][c];
+          const cellWidth = colXsOut[i + 1] - colXsOut[i];
+          const innerWidth = Math.max(1, cellWidth - 2 * cp);
+          const { lines, images, height } = reflowBlocksInWidth(cell.blocks, innerWidth, tSettings, measurer, cp, maxImageHeight);
+          rowHeight = Math.max(rowHeight, height + 2 * cp);
           cellsOut.push({
-            x: colXsOut[c] - colXsOut[0], width: cellWidth,
+            x: colXsOut[i] - colXsOut[0], width: cellWidth,
             fill: fillForCell(cell.bbox),
-            lines: lines.map((l) => ({ ...l, x: l.x + cellPadding })),
+            lines: lines.map((l) => ({ ...l, x: l.x + cp })),
             // ADDENDUM 6, Z12, C1 : images de la cellule (meme traitement
             // que les boites ci-dessus).
-            images: images.map((im) => ({ ...im, x: im.x + cellPadding })),
+            images: images.map((im) => ({ ...im, x: im.x + cp })),
           });
-        }
+        });
         rows.push({ y: rowY, height: rowHeight, cells: cellsOut });
         rowY += rowHeight;
       }
       // ADDENDUM 6, Z12, B2 : identifie une rangee d'EN-TETE pour la
       // repeter en haut de chaque fragment quand le tableau doit etre
       // scinde entre deux pages (cf. splitTableItem ci-dessous). Detection
-      // par TOUTES ses cellules en gras uniquement (cell.fill, cable au
-      // lot Z12/E2 ci-dessus, identifie une colonne d'en-tete coloree --
-      // "Noms/Verbes/..." de 10_FicheOrtho.pdf -- pas une RANGEE, cas
-      // different de celui vise ici : pas reutilise pour ce signal).
-      const headerRow = isHeaderRow(rows[0]) ? rows[0] : null;
-      items.push({
-        kind: 'table', x: rect.x, y: rect.y, width: colXsOut[colXsOut.length - 1] - colXsOut[0],
+      // par TOUTES ses cellules en gras uniquement.
+      const headerRow = rows.length && isHeaderRow(rows[0]) ? rows[0] : null;
+      const rect = toOutputRect(table, widthRatio, pageHeightSrc);
+      return {
+        kind: 'table', x: marginX, y: rect.y, width: colXsOut[colXsOut.length - 1] - colXsOut[0],
         height: rowY, colBounds: colXsOut.map((x) => x - colXsOut[0]), rows,
         // srcBottomY/srcLeftX (ADDENDUM 6, Z12, A2) : cf. commentaire sur
         // l'item 'box' ci-dessus.
-        srcTopY: table.y1, srcBottomY: table.y0, srcLeftX: table.x0,
+        srcTopY: table.y1, srcBottomY: table.y0, srcLeftX: table.x0, srcCenterX: (table.x0 + table.x1) / 2,
         headerRow,
+        cellPadding: cp,
+      };
+    }
+
+    // v0.3, lot 5 (T1, decision E4) -- colonne d'en-tete de rangee
+    // redondante : chaque cellule de donnee commence deja par son libelle
+    // (« je / j' » -> « j'etais »). Vrai pour tous les tableaux de
+    // conjugaison remplis ; on la supprime alors des tableaux larges.
+    function rowHeaderIsRedundant(grid) {
+      let checked = 0;
+      for (let r = 0; r < grid.length; r++) {
+        const label = cellText(grid[r][0]).toLowerCase();
+        if (!label) continue;
+        const alts = label.split('/').map((a) => a.trim()).filter(Boolean);
+        for (let c = 1; c < grid[r].length; c++) {
+          const t = cellText(grid[r][c]).toLowerCase();
+          if (!t) continue;
+          const ok = alts.some((a) => (/['’]$/.test(a) ? t.startsWith(a) : (t === a || t.startsWith(a + ' '))));
+          if (!ok) return false;
+          checked++;
+        }
+      }
+      return checked >= 2;
+    }
+
+    // Titre du tableau source : le titre (h1-h3) de flux libre le plus proche
+    // AU-DESSUS du tableau, dans son emprise horizontale.
+    function findTableTitle(table) {
+      let best = null, bestD = Infinity;
+      for (const b of free) {
+        if (!b.bbox || !/^h[123]$/.test(b.type)) continue;
+        const d = b.bbox.y0 - table.y1;
+        if (d < -4 || d > 150) continue;
+        if (b.bbox.x1 < table.x0 || b.bbox.x0 > table.x1) continue;
+        if (d < bestD) { bestD = d; best = b; }
+      }
+      return best;
+    }
+
+    tables.forEach((table, ti) => {
+      const grid = tableCells[ti];
+      const numCols = table.colBounds.length - 1;
+      const allCols = [...Array(numCols).keys()];
+      const item = buildTableItem(table, grid, allCols, settings, usableWidthForTables, false);
+      const minTotal = allCols.reduce((a, c) => {
+        let m = 0;
+        for (let r = 0; r < grid.length; r++) m = Math.max(m, widestTokenWidth(grid[r][c].blocks, settings.fontSize, measurer, settings));
+        return a + m + 2 * cellPadding;
+      }, 0);
+      // v0.3, lot 5 (E4, decision du 22/09/2026) -- tableau LARGE : sa
+      // largeur minimale (mot le plus long par colonne) depasse la largeur
+      // utile au corps choisi. Rendu : page A4 PAYSAGE, corps 20 pt pour ce
+      // tableau seulement (plancher Z2), 3 colonnes de donnees par page au
+      // plus, dans l'ordre source, en-tete repete ; colonne des pronoms
+      // retiree si redondante ; titre du tableau repete, suffixe (k/n).
+      // Chaque groupe demarre sur sa propre page paysage et la page suivante
+      // repasse en portrait (E7 : paysage page par page, tableaux larges
+      // uniquement).
+      if (minTotal <= usableWidthForTables || numCols < 3) { items.push(item); return; }
+      const dropHeader = rowHeaderIsRedundant(grid);
+      const dataCols = allCols.slice(1);
+      const groups = [];
+      for (let i = 0; i < dataCols.length; i += 3) groups.push(dataCols.slice(i, i + 3));
+      const tSettings = { ...settings, fontSize: 20 };
+      const titleBlock = findTableTitle(table);
+      const titleText = titleBlock ? (titleBlock.runs || []).map((r) => r.text).join('').replace(/\s+/g, ' ').trim() : '';
+      if (titleBlock) consumedTitleBlocks.add(titleBlock);
+      const maxW = settings.orientation === 'paysage' ? usableWidthForTables : usableWidthLandscape;
+      groups.forEach((g, k) => {
+        const groupId = 'paysage-' + (pageSizeForPage.srcIndex || 0) + '-' + ti + '-' + k;
+        const cols = dropHeader ? g : [0, ...g];
+        const suffix = groups.length > 1 ? ' (' + (k + 1) + '/' + groups.length + ')' : '';
+        const captionText = titleText ? titleText + suffix : (suffix ? 'Tableau' + suffix : '');
+        const order = table.x0 + (k + 1) * 0.01;
+        if (captionText) {
+          const cap = reflowBlocksInWidth([{ type: 'h2', runs: [{ text: captionText, bold: true, color: titleBlock && titleBlock.runs[0] ? titleBlock.runs[0].color : null }] }],
+            maxW, tSettings, measurer, 0);
+          items.push({ kind: 'flow', x: MARGIN_MM * MM_TO_PT, y: 0, width: maxW, height: cap.height, lines: cap.lines,
+            srcTopY: table.y1, srcBottomY: table.y0, srcLeftX: order - 0.005, srcCenterX: (table.x0 + table.x1) / 2, landscapeGroup: groupId });
+        }
+        const gi = buildTableItem(table, grid, cols, tSettings, maxW, true);
+        gi.srcLeftX = order;
+        gi.landscapeGroup = groupId;
+        items.push(gi);
       });
     });
 
@@ -886,12 +1116,13 @@
     // les conteneurs par position Y ci-dessous ; ici on ne fait que les
     // reflow individuellement pour connaitre leur hauteur).
     for (const block of free) {
+      if (consumedTitleBlocks.has(block)) continue; // repris en tete de chaque page paysage (E4)
       if (block.type === 'image') {
-        if (!settings.showImages || !block.bbox) continue;
+        if (!settings.showImages || !block.bbox || block.small) continue; // petite image hors conteneur : ecartee (E6)
         const rect = toOutputRect(block.bbox, widthRatio, pageHeightSrc);
         items.push({ kind: 'image', x: margin, y: rect.y, width: usableWidth,
           height: usableWidth * (rect.height / rect.width), src: block.dataUrl,
-          srcTopY: block.bbox.y1, srcBottomY: block.bbox.y0, srcLeftX: block.bbox.x0 });
+          srcTopY: block.bbox.y1, srcBottomY: block.bbox.y0, srcLeftX: block.bbox.x0, srcCenterX: (block.bbox.x0 + block.bbox.x1) / 2 });
         continue;
       }
       const { lines, height } = reflowBlocksInWidth([block], usableWidth, settings, measurer, 0);
@@ -907,6 +1138,7 @@
         // le tri gauche->droite au sein d'une bande s'il devait un jour en
         // partager une.
         srcTopY: block.bbox ? block.bbox.y1 : 0, srcBottomY: block.bbox ? block.bbox.y0 : 0, srcLeftX: 0,
+        srcCenterX: block.bbox ? (block.bbox.x0 + block.bbox.x1) / 2 : undefined,
       });
     }
 
@@ -938,26 +1170,52 @@
     function chevauchementVertical(a, b) {
       return Math.min(a.srcTopY, b.srcTopY) - Math.max(a.srcBottomY, b.srcBottomY);
     }
-    const parBandeau = items.slice().sort((a, b) => b.srcTopY - a.srcTopY);
-    const bandes = [];
-    for (const it of parBandeau) {
-      const h = Math.max(1, it.srcTopY - it.srcBottomY);
-      let bande = bandes.find((bd) => chevauchementVertical(bd, it) > 0.4 * Math.min(bd.hauteur, h));
-      if (!bande) {
-        bande = { srcTopY: it.srcTopY, srcBottomY: it.srcBottomY, hauteur: h, items: [] };
-        bandes.push(bande);
-      } else {
-        bande.srcTopY = Math.max(bande.srcTopY, it.srcTopY);
-        bande.srcBottomY = Math.min(bande.srcBottomY, it.srcBottomY);
-        bande.hauteur = Math.max(1, bande.srcTopY - bande.srcBottomY);
+    function ordonnerParBandes(liste) {
+      const parBandeau = liste.slice().sort((a, b) => b.srcTopY - a.srcTopY);
+      const bandes = [];
+      for (const it of parBandeau) {
+        const h = Math.max(1, it.srcTopY - it.srcBottomY);
+        let bande = bandes.find((bd) => chevauchementVertical(bd, it) > 0.4 * Math.min(bd.hauteur, h));
+        if (!bande) {
+          bande = { srcTopY: it.srcTopY, srcBottomY: it.srcBottomY, hauteur: h, items: [] };
+          bandes.push(bande);
+        } else {
+          bande.srcTopY = Math.max(bande.srcTopY, it.srcTopY);
+          bande.srcBottomY = Math.min(bande.srcBottomY, it.srcBottomY);
+          bande.hauteur = Math.max(1, bande.srcTopY - bande.srcBottomY);
+        }
+        bande.items.push(it);
       }
-      bande.items.push(it);
+      bandes.sort((a, b) => b.srcTopY - a.srcTopY);
+      const out = [];
+      for (const bande of bandes) {
+        bande.items.sort((a, b) => a.srcLeftX - b.srcLeftX);
+        out.push(...bande.items);
+      }
+      return out;
     }
-    bandes.sort((a, b) => b.srcTopY - a.srcTopY);
-    const orderedItems = [];
-    for (const bande of bandes) {
-      bande.items.sort((a, b) => a.srcLeftX - b.srcLeftX);
-      orderedItems.push(...bande.items);
+    // v0.3, lot 2 (S1) -- ordre de lecture REGION PAR REGION de decoupe
+    // (haut -> bas, gauche -> droite, cf. buildRegions) : deux exercices
+    // differents poses cote a cote de part et d'autre d'une ligne de
+    // decoupe verticale ne doivent pas s'entrelacer bande par bande.
+    const regions = pageShapesForPage.regions || null;
+    let orderedItems;
+    if (regions && regions.length > 1) {
+      const regionOf = (it) => {
+        if (it.srcCenterX === undefined) return -1;
+        const cy = (it.srcTopY + it.srcBottomY) / 2;
+        return regions.findIndex((r) => it.srcCenterX >= r.x0 && it.srcCenterX < r.x1 && cy > r.y0 && cy <= r.y1);
+      };
+      const parRegion = new Map();
+      for (const it of items) {
+        const ri = regionOf(it);
+        if (!parRegion.has(ri)) parRegion.set(ri, []);
+        parRegion.get(ri).push(it);
+      }
+      orderedItems = [];
+      for (const ri of [...parRegion.keys()].sort((a, b) => a - b)) orderedItems.push(...ordonnerParBandes(parRegion.get(ri)));
+    } else {
+      orderedItems = ordonnerParBandes(items);
     }
     items.length = 0;
     items.push(...orderedItems);
@@ -972,7 +1230,8 @@
     // garantis identiques).
     const gap = 0.8 * settings.fontSize;
     const usableHeight = dims.height - 2 * margin;
-    const outPages = paginateItems(orderedItems, usableHeight, margin, gap, settings, measurer);
+    const outPages = paginateItems(orderedItems, usableHeight, margin, gap, settings, measurer,
+      { usableHeightLandscape: landscapeDims.height - 2 * margin });
 
     for (const pageItems of outPages) {
       for (const item of pageItems) {
@@ -998,7 +1257,10 @@
     return {
       pages: outPages.map((pageItems) => ({
         items: pageItems,
-        pageDims: { width: pageWidthOut, height: dims.height },
+        // v0.3 (E4) : une page de tableau large est en A4 paysage, quel
+        // que soit le reglage d'orientation du reste du document.
+        pageDims: pageItems.landscape ? { width: landscapeDims.width, height: landscapeDims.height }
+          : { width: pageWidthOut, height: dims.height },
         margin,
       })),
       settings,
@@ -1018,9 +1280,15 @@
   // devenues bien plus hautes en largeur de page pleine). Une image reste
   // seule non scindable (element atomique, y compris quand elle est a
   // l'interieur d'une boite/cellule, cf. Z12 C1 et splitBoxItem).
-  function paginateItems(orderedItems, usableHeight, margin, gap, settings, measurer) {
+  function paginateItems(orderedItems, usableHeightPortrait, margin, gap, settings, measurer, opts) {
     const pages = [];
     let current = [];
+    // v0.3 (E4) : un groupe d'items `landscapeGroup` (titre + tableau large)
+    // occupe sa ou ses propres pages paysage ; le contenu suivant repart sur
+    // une page portrait.
+    const usableHeightLandscape = (opts && opts.usableHeightLandscape) || usableHeightPortrait;
+    let curGroup = null;
+    let usableHeight = usableHeightPortrait;
     // `y` est la position ABSOLUE sur la page de sortie (0 = bord haut de la
     // page), pas relative a la zone utile : demarre a `margin`, jamais a 0,
     // sinon le premier item de chaque page colle au bord (bug reel corrige
@@ -1030,12 +1298,18 @@
     let y = margin;
 
     function newPage() {
-      if (current.length) pages.push(current);
+      if (current.length) { current.landscape = !!curGroup; pages.push(current); }
       current = [];
       y = margin;
     }
 
     for (let item of orderedItems) {
+      const group = item.landscapeGroup || null;
+      if (group !== curGroup) {
+        newPage();
+        curGroup = group;
+        usableHeight = curGroup ? usableHeightLandscape : usableHeightPortrait;
+      }
       // ADDENDUM 6, Z12, C1 -- garde-fou anti-boucle infinie (bug REEL
       // rencontre en implementant C1, Chrome bloque a 100% CPU sans jamais
       // rendre la page) : splitBoxItem()/splitTableItem()/splitFlowItem()
@@ -1263,7 +1537,7 @@
         }
       }
     }
-    if (current.length) pages.push(current);
+    if (current.length) { current.landscape = !!curGroup; pages.push(current); }
     if (!pages.length) pages.push([]);
     return pages;
   }
@@ -1493,12 +1767,49 @@
   // categorie grammaticale) SAUF si elle est proche du noir pur, auquel cas
   // elle suit plutot le theme (permet par ex. un contraste jaune-sur-bleu
   // marine sans laisser du texte "noir" illisible sur fond sombre).
-  function resolveTextColor(runColor, settings, theme) {
+  //
+  // v0.3, lot 1 (C1/M5/X1) -- plancher de contraste. Mesure du diagnostic :
+  // les 43 fiches ont des titres/intitules dans leur couleur source a 1,7-
+  // 2,2:1 sur blanc (vert d'eau, vert, orange), illisibles pour un lecteur
+  // basse vision ; les terminaisons colorees et les trous pales aussi.
+  // Regle : la couleur source est gardee si son contraste avec le fond
+  // REELLEMENT derriere le texte (fond de page, de boite ou de cellule --
+  // `bg`) atteint 4,5:1 (WCAG AA) ; sinon elle est assombrie (fond clair)
+  // ou eclaircie (fond sombre) en gardant sa teinte, juste assez pour
+  // l'atteindre. S'applique aussi a la couleur du theme (texte noir sur une
+  // boite a fond sombre). Seuil unique 4,5:1 : l'outil sert un lecteur basse
+  // vision, le seuil « grand texte » (3:1) ne suffit pas.
+  const MIN_CONTRAST = 4.5;
+  function relLuminance(c) {
+    const f = (v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); };
+    return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]);
+  }
+  function contrastRatio(a, b) {
+    const la = relLuminance(a), lb = relLuminance(b);
+    return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+  }
+  function ensureContrast(color, bg, minRatio) {
+    if (contrastRatio(color, bg) >= minRatio) return color;
+    const target = relLuminance(bg) > 0.18 ? [0, 0, 0] : [255, 255, 255];
+    for (let t = 0.05; t <= 1.0001; t += 0.05) {
+      const mixed = color.map((v, i) => Math.round(v + (target[i] - v) * t));
+      if (contrastRatio(mixed, bg) >= minRatio) return mixed;
+    }
+    return target;
+  }
+
+  function resolveTextColor(runColor, settings, theme, bg) {
     const themeFg = hexToRgbArr(theme.fg);
-    if (settings.colorMode === 'nb') return themeFg;
-    if (!runColor) return themeFg;
-    if (runColor[0] < 20 && runColor[1] < 20 && runColor[2] < 20) return themeFg;
-    return runColor;
+    const back = bg || hexToRgbArr(theme.bg);
+    let c;
+    if (settings.colorMode === 'nb' || !runColor) c = themeFg;
+    else if (runColor[0] < 20 && runColor[1] < 20 && runColor[2] < 20) c = themeFg;
+    else c = [Math.round(runColor[0]), Math.round(runColor[1]), Math.round(runColor[2])];
+    // Gris ou blanc sous le seuil (chiffre blanc d'une pastille dont le
+    // disque n'est pas rendu) : couleur du theme plutot qu'un gris juste
+    // passable -- seules les couleurs franches gardent leur teinte.
+    if (!isChromatic(c) && contrastRatio(c, back) < MIN_CONTRAST) c = themeFg;
+    return ensureContrast(c, back, MIN_CONTRAST);
   }
 
   // Boites/tableaux : en mode "nb", fond = fond de page (pas de bloc de

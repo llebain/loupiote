@@ -14,10 +14,8 @@
     doc.addFont('Luciole-Regular.ttf', 'Luciole', 'normal');
     doc.addFileToVFS('Luciole-Bold.ttf', F.lucioleBold);
     doc.addFont('Luciole-Bold.ttf', 'Luciole', 'bold');
-    doc.addFileToVFS('Luciole-Italic.ttf', F.lucioleItalic);
-    doc.addFont('Luciole-Italic.ttf', 'Luciole', 'italic');
-    doc.addFileToVFS('Luciole-BoldItalic.ttf', F.lucioleBoldItalic);
-    doc.addFont('Luciole-BoldItalic.ttf', 'Luciole', 'bolditalic');
+    // v0.3 (E9) : les polices italiques ne sont plus embarquees -- aucun
+    // italique n'est jamais rendu (styleForRun, 03-layout-engine.js).
   }
 
   // Cree un document jsPDF pret a l'emploi, utilisable a la fois comme
@@ -44,6 +42,9 @@
     const doc = new jsPDFCtor({
       unit: 'pt',
       format: [firstPageDims.width, firstPageDims.height],
+      // v0.3 (E4) : orientation explicite -- sans elle, jsPDF remet en
+      // portrait un format plus large que haut (premiere page paysage).
+      orientation: firstPageDims.width > firstPageDims.height ? 'landscape' : 'portrait',
       compress: true,
     });
     embedLucioleFonts(doc);
@@ -66,22 +67,32 @@
     }
   }
 
-  function renderLines(doc, lines, settings, theme) {
+  // `bg` (v0.3, lot 1, C1) : couleur du fond REELLEMENT derriere ces lignes
+  // (page, boite ou cellule), pour le plancher de contraste de
+  // resolveTextColor -- meme valeur que l'apercu (05-main.js).
+  function renderLines(doc, lines, settings, theme, bg) {
     for (const line of lines) {
       let x = line.x;
       for (const seg of line.segments) {
-        doc.setFont('Luciole', seg.style);
+        doc.setFont('Luciole', seg.style === 'bold' ? 'bold' : 'normal'); // E9 : jamais d'italique
         doc.setFontSize(line.sizePt);
-        const [r, g, b] = window.LayoutEngine.resolveTextColor(seg.color, settings, theme);
+        const [r, g, b] = window.LayoutEngine.resolveTextColor(seg.color, settings, theme, bg);
         doc.setTextColor(r, g, b);
         // jsPDF n'a pas d'option "barre" native : trace un filet a mi-hauteur
         // de casse sous le texte, dans la meme couleur que le segment.
         doc.text(seg.text, x, line.y, { charSpace: undefined });
-        if (seg.strikethrough) {
+        if (seg.strikethrough || seg.underline) {
           doc.setDrawColor(r, g, b);
           doc.setLineWidth(Math.max(0.5, line.sizePt * 0.045));
+        }
+        if (seg.strikethrough) {
           const strikeY = line.y - line.sizePt * 0.3;
           doc.line(x, strikeY, x + seg.width, strikeY);
+        }
+        // v0.3 (E5) : souligne (marque N&B d'un run deja gras).
+        if (seg.underline) {
+          const underY = line.y + line.sizePt * 0.12;
+          doc.line(x, underY, x + seg.width, underY);
         }
         x += seg.width;
       }
@@ -100,7 +111,7 @@
     const [bgR, bgG, bgB] = hexToRgb(theme.bg);
 
     layout.pages.forEach((page, pageIndex) => {
-      if (pageIndex > 0) doc.addPage([page.pageDims.width, page.pageDims.height]);
+      if (pageIndex > 0) doc.addPage([page.pageDims.width, page.pageDims.height], page.pageDims.width > page.pageDims.height ? 'landscape' : 'portrait');
 
       // Contraste invers/colore : rectangle plein page D'ABORD, texte ensuite.
       doc.setFillColor(bgR, bgG, bgB);
@@ -111,7 +122,7 @@
           if (!settings.showImages) continue;
           renderImage(doc, item);
         } else if (item.kind === 'flow') {
-          renderLines(doc, item.lines, settings, theme);
+          renderLines(doc, item.lines, settings, theme, [bgR, bgG, bgB]);
         } else if (item.kind === 'box') {
           // Calque de fond decoratif (bande enveloppante fusionnee dans cet
           // item, cf. Addendum 6 Z10bis -- jamais un item separe, pour ne
@@ -129,7 +140,7 @@
           doc.setDrawColor(colors.stroke[0], colors.stroke[1], colors.stroke[2]);
           doc.setLineWidth(1.2);
           doc.roundedRect(item.x, item.y, item.width, item.height, 8, 8, 'FD');
-          renderLines(doc, item.lines, settings, theme);
+          renderLines(doc, item.lines, settings, theme, colors.fill);
           // ADDENDUM 6, Z12, C1 : images de la boite (cf. 03-layout-engine.js,
           // reflowBlocksInWidth) -- meme fonction de rendu que les images de
           // premier niveau, coordonnees deja absolues.
@@ -145,14 +156,16 @@
               // `cell.fill` que l'apercu DOM (05-main.js), meme resolution
               // de couleur -- l'export PDF doit rester identique a l'apercu
               // (principe fondateur, cf. CADRAGE-Z12.md).
+              let cellBg = [bgR, bgG, bgB];
               if (cell.fill) {
                 const cellColors = window.LayoutEngine.resolveContainerColors(cell.fill, null, settings, theme);
                 doc.setFillColor(cellColors.fill[0], cellColors.fill[1], cellColors.fill[2]);
                 doc.rect(item.x + cell.x, item.y + row.y, cell.width, row.height, 'FD');
+                cellBg = cellColors.fill;
               } else {
                 doc.rect(item.x + cell.x, item.y + row.y, cell.width, row.height, 'S');
               }
-              renderLines(doc, cell.lines, settings, theme);
+              renderLines(doc, cell.lines, settings, theme, cellBg);
               // ADDENDUM 6, Z12, C1 : images de la cellule.
               if (settings.showImages && cell.images) for (const im of cell.images) renderImage(doc, im);
             }
