@@ -278,7 +278,7 @@ async function analyserDansLaPage(b64Source, b64Adapte, seuilContraste) {
 
 async function main() {
   const t0 = Date.now();
-  const browser = await pw.chromium.launch({ channel: 'chrome', headless: true });
+  const browser = await pw.chromium.launch({ ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }), headless: true });
   const consoleWarns = [];
   const pageErrors = [];
   let crashed = false;
@@ -317,7 +317,9 @@ async function main() {
       }
       const blocks = window.__DEBUG_BLOCKS__ || [];
       const texteSource = blocks
-        .filter((b) => !b.secondary && !b.frontMatter && b.type !== 'needs-ocr')
+        // v0.3 (E1) : exemplaires en double exclus du texte attendu -- la
+        // couverture se mesure apres dedoublonnage (plan v0.3, §7, 0.2).
+        .filter((b) => !b.secondary && !b.frontMatter && !b.duplicate && b.type !== 'needs-ocr')
         .map((b) => (b.runs || []).map((r) => r.text || '').join(''))
         .join(' ');
       return { pagesApercu: pages.length, over, texteSource, blocksDisponibles: !!window.__DEBUG_BLOCKS__ };
