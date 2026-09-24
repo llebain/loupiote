@@ -8,6 +8,7 @@
 // (chevauchements, espacements) qui a demande un oeil humain a plusieurs
 // reprises cette session (PLAN, Addendum 6, sections Z7-Z8).
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { setup, runFullPipeline, extractPdf } from './harness.mjs';
 
@@ -34,12 +35,12 @@ const FIXTURES = [
   { path: p('../fixtures/04-entete-pied-repetes.pdf'), minBlocks: 2, label: '04-entete-pied-repetes' },
   { path: p('../fixtures/05-avec-images.pdf'), minBlocks: 2, label: '05-avec-images' },
   { path: p('../fixtures/06-page-unique-dense.pdf'), minBlocks: 1, label: '06-page-unique-dense' },
-  { path: p('../../../corpus/F1-ortho-fiches/10_FicheOrtho.pdf'), minBlocks: 15, expectKinds: ['table', 'box'], label: '10_FicheOrtho' },
-  { path: p('../../../corpus/divers/Sq4_Fiche1_lire_recettes.pdf'), minBlocks: 10, expectKinds: ['box'], label: 'Sq4_Fiche1_lire_recettes' },
-  { path: p('../../../corpus/F3-grammaire-cartes/2_Memo_Carte_indiv1.pdf'), minBlocks: 5, expectKinds: ['box'], label: '2_Memo_Carte_indiv1' },
+  { path: p('../../../corpus/F1-ortho-fiches/10_FicheOrtho.pdf'), minBlocks: 15, corpus: true, expectKinds: ['table', 'box'], label: '10_FicheOrtho' },
+  { path: p('../../../corpus/divers/Sq4_Fiche1_lire_recettes.pdf'), minBlocks: 10, corpus: true, expectKinds: ['box'], label: 'Sq4_Fiche1_lire_recettes' },
+  { path: p('../../../corpus/F3-grammaire-cartes/2_Memo_Carte_indiv1.pdf'), minBlocks: 5, corpus: true, expectKinds: ['box'], label: '2_Memo_Carte_indiv1' },
 ];
 
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skipped = 0;
 const failures = [];
 
 function check(label, cond, detail) {
@@ -58,6 +59,15 @@ async function run() {
 
   for (const fx of FIXTURES) {
     console.log(`\n=== ${fx.label} ===`);
+    // Les fiches du corpus ne sont jamais publiees (oeuvres protegees) : sur
+    // un clone du depot public, elles sont absentes et leurs tests ignores
+    // -- explicitement. CORPUS_OBLIGATOIRE=1 en fait un echec (poste de
+    // travail qui a le corpus).
+    if (fx.corpus && !fs.existsSync(fx.path) && !process.env.CORPUS_OBLIGATOIRE) {
+      skipped++;
+      console.log('  (ignore : fiche du corpus absente de ce clone)');
+      continue;
+    }
 
     // 1. Extraction seule : ne doit jamais lever.
     let extraction;
@@ -189,7 +199,7 @@ async function run() {
   }
 
   console.log(`\n${'='.repeat(60)}`);
-  console.log(`${pass} test(s) reussis, ${fail} echec(s)`);
+  console.log(`${pass} test(s) reussis, ${fail} echec(s)` + (skipped ? `, ${skipped} fiche(s) du corpus ignoree(s) (absentes)` : ''));
   if (fail > 0) {
     console.log('\nEchecs :');
     for (const f of failures) console.log('  - ' + f);

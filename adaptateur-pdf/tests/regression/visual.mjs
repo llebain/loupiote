@@ -137,7 +137,7 @@ async function run() {
   if (!docs.length) { console.error(`Document inconnu : ${seul}`); process.exitCode = 1; return; }
   if (process.env.SHOTS) fs.mkdirSync(OUT, { recursive: true });
 
-  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  const browser = await chromium.launch({ ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }), headless: true });
   try {
     for (const doc of docs) {
       console.log(`\n=== ${doc.name} ===`);
