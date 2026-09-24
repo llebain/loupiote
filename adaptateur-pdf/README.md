@@ -131,6 +131,27 @@ général ; le PDF téléchargé, lui, a bien ses pages paysage.
 | C1 | Contraste : toute couleur de texte est gardée si elle atteint 4,5:1 sur le fond réellement derrière elle (page, encadré, cellule), sinon assombrie (ou éclaircie) en gardant sa teinte. |
 | R4 | Caractères absents de Luciole remplacés à l'extraction (étoile → `*`, flèches → `→`, coches → `☑`), ciseaux retirés. |
 
+**Mesure sur les 43 fiches (24/09/2026, `npm run corpus -- --compare`, 24 pt),
+avant → après ces correctifs :**
+
+| Famille | Pages | Texte retrouvé (couverture) | Lignes sous 4,5:1 | Remarque |
+|---|---|---|---|---|
+| F1 fiches d'orthographe | 3-5 → 3-4 | 0,94-1 (inchangé) | 5-8 → **0** | |
+| F2 exercices | 6-9 → **2-3** | 0,82-0,96 → **0,89-1** | jusqu'à 63 → 0 (5 sur 2 fiches, trous) | glyphes absents 2 → 0, débordements divisés par 2 |
+| F3 mémos carte | 2-6 → 2-6 | légère hausse | jusqu'à 39 → **0** | 4_Memo_Carte : 3 → 6 pages (cartes, lot 7) |
+| F4 mémos tableau | 2-5 → 3-10 | 0,15-0,58 → **0,67-0,99** | jusqu'à 30 → 0-7 | pages paysage (E4) ; **duplication encore élevée sur 16, 17, 19** (≈ 0,5-0,6) |
+| Sq4 | 11 → 12 | 1 | 8 → 0 | |
+
+**Défauts connus restants** :
+- F4 à plusieurs blocs de verbes (16, 17, 19) : sur les fiches réelles,
+  une partie du tableau est encore dupliquée ou mal rangée (la réplique
+  synthétique `v3-conjugaison-deux-blocs` passe, la géométrie réelle
+  diffère) ;
+- F4 pivotées (14, 15, 18) : contenu retrouvé mais mise en page médiocre,
+  10 pages (lot 3, orientation, non commencé) ;
+- F2 03 et 08 : ordre de lecture en légère baisse, lignes de trous encore
+  pâles sur 2 fiches.
+
 Non commencé : cartes mentales reconstruites (E2, lot 7), orientation des
 contenus pivotés (lot 3), trous/cases/soulignés des exercices (lot 4), mots
 encadrés et cerclés (lot 6), profils de collection (lot 8).
