@@ -147,6 +147,10 @@ async function run() {
     const orange = r.blocks.flatMap((b) => b.runs || []).filter((x) => x.text.trim() === 'ons');
     check('couleur-de-terminaison-conservee', orange.length === 1 && orange[0].color && orange[0].color[0] > 200 && orange[0].color[2] < 120,
       `run "ons" : ${JSON.stringify(orange.map((o) => o.color))}`);
+    // X1 : une ligne de trous pale est rendue dans la couleur du theme.
+    const trous = renderedSegments(ctx, r.layout).filter((x) => /^…+$/.test(x.s.text.trim()));
+    check('X1-trous-pales-en-noir', trous.length >= 1 && trous.every((x) => x.color.every((v) => v < 30)),
+      JSON.stringify(trous.map((x) => x.color)));
     // E5 : en N&B, la terminaison coloree (deja grasse) est soulignee.
     const nb = await load('v3-couleurs.pdf', { fontSize: 24, colorMode: 'nb' });
     const segs = renderedSegments(ctx, nb.layout).filter((x) => x.s.text.includes('ons'));

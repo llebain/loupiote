@@ -214,6 +214,9 @@ def f_couleurs(d):
     teal = (0.573, 0.804, 0.773)
     pdf.runs(56, y, [('Complete le mot : la s',), ('\u2026\u2026', None, teal), ('r de mon amie.',)])
     y -= 30
+    # X1 : ligne de trous seule (ligne a completer), meme teal pale
+    pdf.text(56, y, '\u2026' * 20, size=12, color=teal)
+    y -= 30
     # M5 : terminaisons colorees (orange pale, en gras : pdf.js ne coupe ses
     # items qu'aux changements de police, pas de couleur) dans un texte noir
     orange = (0.96, 0.62, 0.25)

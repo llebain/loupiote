@@ -93,8 +93,20 @@
     if (!a || !b) return false;
     return Math.abs(a[0] - b[0]) < 8 && Math.abs(a[1] - b[1]) < 8 && Math.abs(a[2] - b[2]) < 8;
   }
+  // v0.3 (X1, plan lot 4) : un trou (suite de points de suspension) dans
+  // une couleur pale -- sous 3:1 sur blanc -- est rendu dans la couleur du
+  // theme : des points fins et pales sont invisibles pour un lecteur basse
+  // vision meme une fois assombris juste au seuil (mesure : 1,86:1 a
+  // l'ecran sur deux fiches d'exercices).
+  const HOLE_RE = /^[\s.…_]+$/;
+  function paleHoles(runs) {
+    return runs.map((r) => (r.color && HOLE_RE.test(r.text || '') && /[.…_]/.test(r.text) &&
+      contrastRatio(r.color, [255, 255, 255]) < 3 ? { ...r, color: null } : r));
+  }
   function runsForDisplay(runs, settings) {
-    if (!runs || settings.colorMode !== 'nb') return runs;
+    if (!runs) return runs;
+    runs = paleHoles(runs);
+    if (settings.colorMode !== 'nb') return runs;
     const weights = [];
     for (const r of runs) {
       const n = (r.text || '').replace(/\s/g, '').length;
@@ -1779,7 +1791,11 @@
   // l'atteindre. S'applique aussi a la couleur du theme (texte noir sur une
   // boite a fond sombre). Seuil unique 4,5:1 : l'outil sert un lecteur basse
   // vision, le seuil « grand texte » (3:1) ne suffit pas.
-  const MIN_CONTRAST = 4.5;
+  // Cible 5,0:1 pour garantir 4,5:1 A L'ECRAN : mesure sur le corpus
+  // (npm run corpus, 24/09/2026), une couleur calculee a 4,5:1 tout juste
+  // ressort a 4,25-4,48:1 une fois rendue (anticrenelage des bords de
+  // glyphe, surtout en gras et sur les petits signes).
+  const MIN_CONTRAST = 5.0;
   function relLuminance(c) {
     const f = (v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); };
     return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]);
