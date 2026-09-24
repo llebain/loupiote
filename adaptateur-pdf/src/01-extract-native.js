@@ -331,6 +331,17 @@
     }
   }
 
+  // v0.3 -- une frontiere de colonne (bord de cellule, d'encadre, colonne
+  // interne, ligne de decoupe verticale) ne vaut QUE sur la hauteur du
+  // conteneur qui la produit : {x, y0, y1}. Avant, elle valait sur toute
+  // la page -- un titre en haut de fiche etait « coupe » aux abscisses des
+  // colonnes du tableau du bas (mesure sur le corpus, 24/09/2026 : titres
+  // scindes en deux paragraphes, espaces perdues entre mots en italique).
+  function boundariesAt(bounds, y) {
+    if (!bounds || !bounds.length) return [];
+    return bounds.filter((b) => typeof b === 'number' || (y >= b.y0 - 2 && y <= b.y1 + 2)).map((b) => (typeof b === 'number' ? b : b.x));
+  }
+
   function groupIntoLines(items, styles, strikeLines, colBoundaries, decorative) {
     const enriched = items.map((it, idx) => {
       const size = Math.hypot(it.transform[0], it.transform[1]) || 1;
@@ -358,7 +369,7 @@
 
     return lines.flatMap((line) => {
       line.items.sort((a, b) => a.x - b.x);
-      const segments = splitItemsAtColumnBoundaries(line.items, colBoundaries);
+      const segments = splitItemsAtColumnBoundaries(line.items, boundariesAt(colBoundaries, line.y));
       // ADDENDUM 6, Z12, D2 -- correctif du 20/09/2026 (cause racine reelle
       // du faux titre en gros/gras signale par le cadrage, un item de liste
       // a puce d'une ligne d'ingredient, sur Sq4_Fiche1_lire_recettes.pdf) :
@@ -707,6 +718,17 @@
   // pour scinder la ligne, au meme titre qu'un marqueur de liste embarque.
   function splitLineAtColumnGaps(l) {
     const cuts = (l.gapSplits || []).filter((c) => c > 0 && c < l.text.length);
+    // v0.3 -- une ligne TABULEE de mots isoles (serie de terminaisons
+    // « ais  ais  ait  ions  iez  aient » etalee sur la largeur d'un
+    // encadre) n'est pas une suite de mini-colonnes : la scinder donnait un
+    // paragraphe par mot (corpus, 24/09/2026). Gardee d'un seul tenant si
+    // elle compte au moins 3 morceaux, tous d'un seul mot court.
+    if (cuts.length >= 2) {
+      const bounds = [0, ...cuts, l.text.length];
+      const pieces = [];
+      for (let i = 0; i < bounds.length - 1; i++) pieces.push(l.text.slice(bounds[i], bounds[i + 1]).trim());
+      if (pieces.every((t) => t && !/\s/.test(t) && t.length <= 12)) return [l];
+    }
     return sliceLineAtOffsets(l, cuts);
   }
 
@@ -1543,11 +1565,11 @@
         // v0.3, lot 1 (S6) : contraintes de detectTables (cf. son commentaire).
         tables = detectTables(pageShapes.lines, sizableBoxes, { modalSize: modalRough, textLines: roughLines0, cutLines: cutLineShapes });
         pageShapes.tables = tables;
-        colBoundaries = tables.flatMap((t) => t.colBounds);
+        colBoundaries = tables.flatMap((t) => t.colBounds.map((x) => ({ x, y0: t.y0, y1: t.y1 })));
         // Une ligne de decoupe verticale separe deux exemplaires cote a cote :
         // deux items sur la meme ligne de base de part et d'autre ne forment
         // jamais une meme ligne physique.
-        for (const c of cuts) if (c.orient === 'v') colBoundaries.push(c.pos);
+        for (const c of cuts) if (c.orient === 'v') colBoundaries.push({ x: c.pos, y0: c.start, y1: c.end });
 
         // Bords de CHAQUE boite comme frontieres de colonne (ADDENDUM 6,
         // Z10). Bug reel trouve sur Sq4_Fiche1_lire_recettes.pdf : deux
@@ -1562,7 +1584,7 @@
         // fusionner). Ajoute donc x0 ET x1 de CHAQUE boite, pas seulement
         // les tableaux bordes.
         for (const box of sizableBoxes) {
-          colBoundaries.push(box.x0, box.x1);
+          colBoundaries.push({ x: box.x0, y0: box.y0, y1: box.y1 }, { x: box.x1, y0: box.y0, y1: box.y1 });
         }
 
         // Colonnes de texte sans bordure a l'interieur d'une boite (Z10,
@@ -1575,7 +1597,7 @@
           if (inBoxTable) continue;
           const linesInBox = roughLines.filter((l) => l.x0 >= box.x0 - 2 && l.x0 <= box.x1 + 2 && l.y >= box.y0 && l.y <= box.y1);
           const splitX = detectColumnSplitX(linesInBox, box.x0, box.x1 - box.x0);
-          if (splitX !== null) colBoundaries.push(splitX);
+          if (splitX !== null) colBoundaries.push({ x: splitX, y0: box.y0, y1: box.y1 });
         }
       } catch (e) { /* geometrie best-effort : la ligne de base texte reste exploitable sans elle */ }
 
@@ -1640,9 +1662,9 @@
       // 20/09/2026 : la coupe de groupIntoLines separe bien les lignes,
       // mais sans ce controle ici, flushPara les refusionnait quand meme).
       const pageColBoundaries = pageMeta[p].colBoundaries || [];
-      function columnBand(x) {
+      function columnBand(x, y) {
         let band = 0;
-        for (const b of pageColBoundaries) if (x >= b) band++;
+        for (const b of boundariesAt(pageColBoundaries, y)) if (x >= b) band++;
         return band;
       }
 
@@ -1664,12 +1686,12 @@
         // boite) : le bord droit d'une cellule n'est pas celui du tableau.
         const maxX1ByBand = new Map();
         for (const l of groupLines) {
-          const b = columnBand(l.x0);
+          const b = columnBand(l.x0, l.y);
           maxX1ByBand.set(b, Math.max(maxX1ByBand.get(b) || 0, l.x1 || 0));
         }
-        const bands = new Set(groupLines.map((l) => columnBand(l.x0)));
+        const bands = new Set(groupLines.map((l) => columnBand(l.x0, l.y)));
         const textRightFor = (l) => {
-          const maxX1 = maxX1ByBand.get(columnBand(l.x0)) || 0;
+          const maxX1 = maxX1ByBand.get(columnBand(l.x0, l.y)) || 0;
           return rightEdge && bands.size === 1 && maxX1 < 0.85 * rightEdge ? rightEdge : maxX1;
         };
         let paraLines = [];
@@ -1763,7 +1785,10 @@
             const interline = lastLine.size * 1.2;
             const sameStyle = Math.abs(l.size - lastLine.size) < 0.5;
             const gap = lastLine.y - l.y;
-            const columnChange = columnBand(l.x0) !== columnBand(lastLine.x0);
+            // Deux lignes de part et d'autre d'une frontiere valable a LEUR
+            // hauteur (celle de la ligne precedente ou de la courante).
+            const columnChange = columnBand(l.x0, l.y) !== columnBand(lastLine.x0, l.y) ||
+              columnBand(l.x0, lastLine.y) !== columnBand(lastLine.x0, lastLine.y);
             const opensListItem = detectListMarker(l.text);
             // ADDENDUM 6, Z12, lot 3 (point 2, effet de bord decouvert EN
             // VERIFIANT le partitionnement par conteneur ci-dessus, sur le

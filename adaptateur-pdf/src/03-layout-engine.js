@@ -932,7 +932,8 @@
     // `maxWidth`, avec les reglages `tSettings` (corps propre possible,
     // cf. E4). `evenWidths` : colonnes de largeur egale (groupes paysage)
     // plutot que proportionnelles a la source.
-    function buildTableItem(table, grid, cols, tSettings, maxWidth, evenWidths) {
+    function buildTableItem(table, grid, cols, tSettings, maxWidth, evenWidths, skipEmptyRows, rowsIdx) {
+      const rowSet = rowsIdx ? new Set(rowsIdx) : null;
       const cp = 0.35 * tSettings.fontSize;
       const numCols = cols.length;
       // Largeur minimale par colonne = son mot le plus long, sur toutes ses
@@ -941,6 +942,7 @@
       const minWidths = cols.map((c) => {
         let colMax = 0;
         for (let r = 0; r < grid.length; r++) {
+          if (rowSet && !rowSet.has(r)) continue;
           colMax = Math.max(colMax, widestTokenWidth(grid[r][c].blocks, tSettings.fontSize, measurer, tSettings));
         }
         return colMax + 2 * cp;
@@ -999,6 +1001,11 @@
       let rowY = 0;
       const rows = [];
       for (let r = 0; r < grid.length; r++) {
+        // Groupe paysage (E4) : une rangee sans rien dans les colonnes de
+        // donnees de CE groupe (ex. les rangees d'un autre bloc de verbes
+        // du meme tableau source) n'est pas reproduite vide.
+        if (rowSet && !rowSet.has(r)) continue;
+        if (skipEmptyRows && cols.filter((c) => c !== 0).every((c) => !grid[r][c].blocks.length)) continue;
         const cellsOut = [];
         let rowHeight = 0;
         cols.forEach((c, i) => {
@@ -1090,19 +1097,49 @@
       // Chaque groupe demarre sur sa propre page paysage et la page suivante
       // repasse en portrait (E7 : paysage page par page, tableaux larges
       // uniquement).
-      if (minTotal <= usableWidthForTables || numCols < 3) { items.push(item); return; }
+      // Critere du plan (T1) : plus de 3 colonnes de donnees (verbes), OU
+      // largeur minimale au-dela de la page portrait. Le seul critere de
+      // largeur ne suffit pas (corpus, 24/09/2026) : les cellules se
+      // replient sur 2-3 lignes et un tableau de 3-4 verbes « tient » en
+      // portrait mais s'etale sur plusieurs pages.
+      const dataColCount = numCols - 1;
+      const wide = numCols >= 3 && (dataColCount > 3 || minTotal > usableWidthForTables);
+      if (!wide) { items.push(item); return; }
       const dropHeader = rowHeaderIsRedundant(grid);
       const dataCols = allCols.slice(1);
+      // Un tableau source peut empiler PLUSIEURS blocs de verbes, chacun avec
+      // sa rangee d'en-tete (etiquettes de verbe en capitales) : chaque bloc
+      // est pagine a part, pour que chaque page paysage porte un tableau
+      // entier (corpus, 24/09/2026 : memo a 3 + 4 verbes).
+      const isVerbHeaderRow = (r) => {
+        const cells = dataCols.map((c) => cellText(grid[r][c])).filter(Boolean);
+        return cells.length >= 2 && cells.every((t) => !/[a-zà-ÿ]/.test(t) && /[A-ZÀ-Ý]/.test(t) && t.split(/\s+/).length <= 2);
+      };
+      const headerIdx = grid.map((_, r) => r).filter(isVerbHeaderRow);
+      const allRows = grid.map((_, r) => r);
+      const rowBlocks = [];
+      if (headerIdx.length >= 2) {
+        const pre = allRows.filter((r) => r < headerIdx[0]);
+        headerIdx.forEach((h, k) => {
+          const end = k + 1 < headerIdx.length ? headerIdx[k + 1] : grid.length;
+          rowBlocks.push([...(k === 0 ? pre : []), ...allRows.filter((r) => r >= h && r < end)]);
+        });
+      } else {
+        rowBlocks.push(allRows);
+      }
       const groups = [];
-      for (let i = 0; i < dataCols.length; i += 3) groups.push(dataCols.slice(i, i + 3));
+      for (const rowsIdx of rowBlocks) {
+        const usedCols = dataCols.filter((c) => rowsIdx.some((r) => grid[r][c].blocks.length));
+        for (let i = 0; i < usedCols.length; i += 3) groups.push({ cols: usedCols.slice(i, i + 3), rowsIdx });
+      }
       const tSettings = { ...settings, fontSize: 20 };
       const titleBlock = findTableTitle(table);
       const titleText = titleBlock ? (titleBlock.runs || []).map((r) => r.text).join('').replace(/\s+/g, ' ').trim() : '';
       if (titleBlock) consumedTitleBlocks.add(titleBlock);
       const maxW = settings.orientation === 'paysage' ? usableWidthForTables : usableWidthLandscape;
       groups.forEach((g, k) => {
-        const groupId = 'paysage-' + (pageSizeForPage.srcIndex || 0) + '-' + ti + '-' + k;
-        const cols = dropHeader ? g : [0, ...g];
+        const groupId = 'paysage-' + ti + '-' + k;
+        const cols = dropHeader ? g.cols : [0, ...g.cols];
         const suffix = groups.length > 1 ? ' (' + (k + 1) + '/' + groups.length + ')' : '';
         const captionText = titleText ? titleText + suffix : (suffix ? 'Tableau' + suffix : '');
         const order = table.x0 + (k + 1) * 0.01;
@@ -1112,7 +1149,7 @@
           items.push({ kind: 'flow', x: MARGIN_MM * MM_TO_PT, y: 0, width: maxW, height: cap.height, lines: cap.lines,
             srcTopY: table.y1, srcBottomY: table.y0, srcLeftX: order - 0.005, srcCenterX: (table.x0 + table.x1) / 2, landscapeGroup: groupId });
         }
-        const gi = buildTableItem(table, grid, cols, tSettings, maxW, true);
+        const gi = buildTableItem(table, grid, cols, tSettings, maxW, true, true, g.rowsIdx);
         gi.srcLeftX = order;
         gi.landscapeGroup = groupId;
         items.push(gi);

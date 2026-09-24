@@ -454,6 +454,84 @@ def f_cellule_deux_lignes(d):
     pdf.save(d / 'v3-cellule-deux-lignes.pdf')
 
 
+# Frontieres de colonne limitees a leur conteneur : titre en haut de page
+# fait de mots en italique et d'espaces romaines dans des objets texte
+# separes ; plus bas, un tableau dont les colonnes tombent aux abscisses
+# de ces espaces. (Corpus, 24/09/2026 : « dire,faire,venir » sans espaces,
+# titre scinde en deux paragraphes.)
+def f_titre_et_colonnes(d):
+    pdf = PdfBrut(); pdf.add_page()
+    vert = (0.35, 0.5, 0.1)
+    # Un objet texte PAR morceau (comme la fiche reelle), positions exactes
+    # (chasses AFM d'Helvetica-Bold, identiques en oblique) : les espaces
+    # romaines deviennent des items blancs separes chez pdf.js.
+    afm = {' ': 278, ',': 278, 'C': 722, 'o': 611, 'n': 611, 'j': 278, 'u': 611, 'g': 611, 'e': 556,
+           'r': 389, 'l': 278, 's': 556, 'v': 556, 'b': 611, 'd': 611, 'i': 278, 'f': 333, 'a': 556, 't': 333}
+    x, sz = 56, 18
+    for t, f in [('Conjuguer les verbes', 'F2'), (' ', 'F2'), ('dire,', 'F4'), (' ', 'F2'), ('faire,', 'F4'),
+                 (' ', 'F2'), ('venir', 'F4'), (' ', 'F2'), ('et', 'F2'), (' ', 'F2'), ('voir', 'F4')]:
+        pdf.text(x, 790, t, font=f, size=sz, color=vert)
+        x += sum(afm[c] for c in t) * sz / 1000 + (2.5 if t == ' ' else 0)  # espace un peu elargie (justification)
+    # Tableau plus bas a colonnes serrees : des frontieres tombent forcement
+    # aux abscisses des espaces du titre.
+    cols = list(range(56, 541, 22))
+    for r in range(3):
+        pdf.line(56, 600 - r * 24, cols[-1], 600 - r * 24)
+    for c in cols:
+        pdf.line(c, 600, c, 552)
+    for r in range(2):
+        for c in range(len(cols) - 1):
+            pdf.text(cols[c] + 3, 600 - r * 24 - 16, 'x', size=10)
+    paragraphe(pdf, 56, 740, PROSE)
+    # Ligne tabulee de terminaisons, dans un encadre
+    pdf.stroke_rect(50, 640, 495, 50, color=(0.2, 0.7, 0.6), width=2)
+    pdf.text(60, 672, 'Les terminaisons sont toujours les memes :', size=12)
+    for i, t in enumerate(['ais', 'ais', 'ait', 'ions', 'iez', 'aient']):
+        pdf.text(60 + i * 80, 652, t, font='F2', size=12, color=(0.1, 0.6, 0.5))
+    pdf.save(d / 'v3-titre-et-colonnes.pdf')
+
+
+# E4 sur la structure reelle d'un memo de conjugaison : rangee de titre
+# couvrant le tableau, bloc de 3 verbes puis bloc de 4 verbes plus large
+# (derniere colonne sans cellule dans le premier bloc), etiquettes de verbe
+# encadrees, colonne des pronoms.
+def f_conjugaison_deux_blocs(d):
+    pdf = PdfBrut(); pdf.add_page()
+    teal = (0.1, 0.6, 0.55)
+    pdf.text(40, 800, "Conjuguer quelques verbes a l'imparfait", font='F2', size=15, color=(0.5, 0.7, 0.2))
+    X = [12, 97, 215, 333, 447, 575]
+    pron = ['je', 'tu', 'il / elle / on', 'nous', 'vous', 'ils / elles']
+    term = ['ais', 'ais', 'ait', 'ions', 'iez', 'aient']
+    y = 700
+    def bloc(y, verbes, rad, ncol):
+        right = X[ncol]
+        # rangee d'en-tete (etiquettes encadrees)
+        pdf.line(X[0], y, right, y)
+        for c, v in enumerate(verbes):
+            cx = X[c + 1]
+            pdf.stroke_rect(cx + 20, y - 38, 60, 16, width=0.8)
+            pdf.text(cx + 30, y - 33, v, size=10)
+        yy = y - 48
+        pdf.line(X[0], yy, right, yy)
+        for r in range(6):
+            pdf.text(X[0] + 4, yy - 14, pron[r], size=10)
+            for c, rd in enumerate(rad):
+                pr = pron[r]
+                pdf.runs(X[c + 1] + 4, yy - 14, [(pr + ' ' + rd,), (term[r], 'F2', teal)], size=10)
+            yy -= 20
+            pdf.line(X[0], yy, right, yy)
+        for x in X[:ncol + 1]:
+            pdf.line(x, y, x, yy)
+        return yy
+    # rangee de titre du tableau (pas de separateur vertical interne)
+    pdf.line(X[0], y + 24, X[4], y + 24)
+    pdf.line(X[0], y + 24, X[0], y); pdf.line(X[4], y + 24, X[4], y)
+    pdf.text(120, y + 8, "Conjuguer des verbes a l'imparfait", font='F2', size=11, color=teal)
+    y = bloc(y, ['DIRE', 'FAIRE', 'VENIR'], ['dis', 'fais', 'ven'], 4)
+    bloc(y, ['VOULOIR', 'PRENDRE', 'VOIR', 'POUVOIR'], ['voul', 'pren', 'voy', 'pouv'], 5)
+    pdf.save(d / 'v3-conjugaison-deux-blocs.pdf')
+
+
 # Ordre de composition des matrices (`cm` imbriques) : une boite remplie
 # dessinee sous translation PUIS mise a l'echelle doit etre lue a sa vraie
 # place (x 100..300, y 100..200).
@@ -472,7 +550,8 @@ def generer(fixdir):
     d.mkdir(exist_ok=True)
     for f in (f_couleurs, f_glyphes, f_exposants, f_italique, f_runs, f_mot_coupe,
               f_faux_tableaux, f_decoupe, f_tableau_large, f_liste_sans_puce, f_pastille, f_matrices,
-              f_decoupe_verticale, f_cellule_deux_lignes):
+              f_decoupe_verticale, f_cellule_deux_lignes, f_titre_et_colonnes,
+              f_conjugaison_deux_blocs):
         f(d)
 
 

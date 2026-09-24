@@ -119,7 +119,8 @@ async function run() {
   const load = async (n, s) => { warns.length = 0; const r = await runFullPipeline(ctx, FIX(n), s || { fontSize: 24 }); r.warns = warns.slice(); return r; };
   const names = ['v3-couleurs.pdf', 'v3-glyphes.pdf', 'v3-exposants.pdf', 'v3-italique.pdf', 'v3-runs.pdf', 'v3-mot-coupe.pdf',
     'v3-faux-tableaux.pdf', 'v3-decoupe.pdf', 'v3-tableau-large.pdf', 'v3-liste-sans-puce.pdf', 'v3-pastille.pdf', 'v3-matrices.pdf',
-    'v3-decoupe-verticale.pdf', 'v3-cellule-deux-lignes.pdf'];
+    'v3-decoupe-verticale.pdf', 'v3-cellule-deux-lignes.pdf', 'v3-titre-et-colonnes.pdf',
+    'v3-conjugaison-deux-blocs.pdf'];
   const res = {};
   for (const n of names) {
     console.log(`\n=== ${n} ===`);
@@ -251,6 +252,32 @@ async function run() {
   {
     const t = texts('v3-cellule-deux-lignes.pdf');
     check('cellule-sur-deux-lignes-un-paragraphe', t.includes('Le chat noir dort sur le canape du salon pendant que la pluie tombe.'), JSON.stringify(t));
+  }
+  // Frontieres de colonne limitees a la hauteur de leur conteneur.
+  {
+    const t = texts('v3-titre-et-colonnes.pdf');
+    check('ligne-tabulee-un-seul-paragraphe', t.some((x) => /ais ais ait ions iez aient/.test(x)) && !t.includes('ions'), JSON.stringify(t.filter((x) => /ais|ions/.test(x))));
+    check('titre-hors-tableau-intact', t.some((x) => /^Conjuguer les verbes dire, faire, venir et voir$/.test(x)), JSON.stringify(t.slice(0, 3)));
+  }
+  // E4 sur un memo a deux blocs de verbes (3 + 4) : un bloc par page
+  // paysage, tableau entier, 3 verbes max, formes toutes presentes une fois.
+  {
+    const r = T('v3-conjugaison-deux-blocs.pdf');
+    const pages = r.layout.pages.filter((pg) => pg.items.some((it) => it.kind === 'table'));
+    const tabs = pages.map((pg) => pg.items.filter((it) => it.kind === 'table'));
+    check('E4-blocs/un-tableau-par-page-paysage', pages.length === 3 && tabs.every((t) => t.length === 1) &&
+      pages.every((pg) => pg.pageDims.width > pg.pageDims.height), pages.map((pg, i) => `${pg.pageDims.width.toFixed(0)}:${tabs[i].length}`).join(' '));
+    const cellules = tabs.flat().flatMap((t) => t.rows.flatMap((rw) => rw.cells.map((c) => c.lines.map(lineText).join(' '))));
+    const formes = [];
+    for (const [pr, tm] of [['je', 'ais'], ['tu', 'ais'], ['il / elle / on', 'ait'], ['nous', 'ions'], ['vous', 'iez'], ['ils / elles', 'aient']]) {
+      for (const rd of ['dis', 'fais', 'ven', 'voul', 'pren', 'voy', 'pouv']) formes.push(`${pr} ${rd}${tm}`);
+    }
+    const manquantes = formes.filter((f) => cellules.filter((c) => c === f).length !== 1);
+    check('E4-blocs/42-formes-une-fois', manquantes.length === 0, `${manquantes.length} forme(s) absente(s) ou en double : ${manquantes.slice(0, 4).join(', ')}`);
+    check('E4-blocs/pas-de-colonne-pronoms', !cellules.includes('tu') && !cellules.includes('ils / elles'), 'colonne des pronoms presente');
+    check('E4-blocs/verbes-par-page', tabs.map((t) => t[0].rows.find((rw) => rw.cells.some((c) => /^[A-Z]+$/.test(c.lines.map(lineText).join(''))))
+      .cells.map((c) => c.lines.map(lineText).join('')).join(',')).join(' | ') === 'DIRE,FAIRE,VENIR | VOULOIR,PRENDRE,VOIR | POUVOIR',
+      tabs.map((t) => t[0].rows.length).join(','));
   }
   // Matrices imbriquees.
   {
