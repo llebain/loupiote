@@ -42,14 +42,16 @@ ci-dessous.
   le rappelle explicitement à l'écran). Sur le document de test de
   référence (roman jeunesse scanné, double page, rotation, folios), le taux
   d'erreur caractère mesuré sur un échantillon transcrit à la main est de
-  **1,52 %** — voir `tests/spike-notes.md` section 9.
+  **1,52 %** (notes techniques locales, non publiées : elles citent le
+  document de référence).
 - **Détection d'italique non tentée sur le texte OCRisé.** Le moteur LSTM
   de tesseract.js ne fournit pas d'attribut de style fiable (`font_name`
   vide en pratique). Conformément à la consigne « mieux vaut du romain que
   du faux italique », aucune tentative n'est faite : le texte OCRisé sort
   toujours en romain, même si la source contient des passages en italique.
-  Le texte **natif** (PDF texte, non scanné) conserve en revanche le gras et
-  l'italique d'origine.
+- **Aucun italique, nulle part (décision E9, v0.3).** Le texte natif garde
+  le gras d'origine ; l'italique est lu (il reste dans le modèle du
+  document) mais toujours rendu en romain, dans l'aperçu comme dans le PDF.
 - **Pages très illustrées (couverture, page de dédicace, en-tête de
   section décorative).** Tesseract peut « halluciner » du texte à partir
   d'un graphisme. Un filtre de qualité (identique à celui qui écarte la
@@ -68,12 +70,11 @@ ci-dessous.
   exposée aux technologies d'assistance qui s'appuient sur le balisage.
   Acceptable pour l'usage visé (lecture visuelle agrandie), à dire et non
   cacher.
-- **Mise en page d'origine non conservée, par choix.** *(Décision rouverte le
-  19/09/2026, voir Addendum 6 du plan — en cours de refonte vers une
-  reconstruction par blocs qui conserve tableaux/encadrés/colonnes/images.
-  Cette limite ne décrit encore que le comportement actuel, pas la cible.)*
-  L'outil refait un flux linéaire une colonne (Phase 2 du plan de
-  conception), pas un fac-similé de la mise en page source.
+- **Mise en page par blocs, empilés verticalement.** Tableaux, encadrés et
+  images sont conservés et remis en page sur la largeur de la page A4
+  (décision Z1) ; des conteneurs côte à côte dans la source sont empilés
+  l'un sous l'autre. Les cartes mentales ne sont pas encore reconstruites
+  en texte (décision E2, lot 7 du plan, non commencé).
 - **Ordre de lecture multi-colonnes** : fonctionne sur les cas testés
   (deux colonnes franches, gouttière nette) via un histogramme des
   abscisses de début de ligne. Une mise en page à plus de deux colonnes ou
@@ -81,7 +82,7 @@ ci-dessous.
   colonne unique.
 - **Double page** : la détection de gouttière centrale et l'ordonnancement
   par folio OCRisé fonctionnent sur le document de référence (voir
-  `tests/spike-notes.md`). Sur un document sans folio lisible, l'outil se
+  notes techniques locales). Sur un document sans folio lisible, l'outil se
   rabat sur l'ordre gauche-puis-droite et le signale explicitement.
 - **Limite de taille de fichier PDF déposé** : 300 Mo (au-delà, message
   d'erreur explicite plutôt qu'un plantage silencieux).
@@ -91,17 +92,48 @@ ci-dessous.
 
 ## Ce qui a été vérifié / ce qui ne l'a pas été
 
-Voir le rapport final transmis séparément pour le détail complet. En résumé :
-vérifié sur un fichier réel représentatif (scan de livre jeunesse, double
-page, rotation, folios, dialogues, italiques, césures) et sur six fixtures
-synthétiques (hiérarchie de titres/gras/italique/listes, deux colonnes,
-scan simple, en-tête/pied répétés, images, page dense), plus deux fixtures
-d'erreur (mot de passe, fichier corrompu). Non vérifié à ce stade :
-compatibilité Firefox/Safari (seul Chrome/Chromium a pu être testé dans cet
-environnement), documents de plus de quelques dizaines de pages, mises en
-page à plus de deux colonnes, PDF avec formulaires ou couches OCR
-partiellement correctes (au lieu de totalement inexploitables ou
-totalement fiables).
+Vérifié sur un fichier réel représentatif (scan de livre jeunesse, double
+page, rotation, folios, dialogues, italiques, césures), sur les 43 fiches du
+corpus v0.3 (outil `npm run corpus`, local), et sur des fixtures synthétiques
+régénérables : hiérarchie de titres/gras/italique/listes, deux colonnes, scan
+simple, en-tête/pied répétés, images, page dense, mascottes dans un tableau,
+PDF protégé par mot de passe, fichier corrompu, et une fixture par défaut du
+diagnostic v0.3 (`tests/fixtures_v03.py`).
+
+**Compatibilité navigateurs.** Seul Chrome/Chromium est testé (automatiquement
+et à l'œil). Firefox et Safari n'ont **pas** été essayés. Relecture du code :
+la partie de l'outil n'utilise rien au-delà d'ES2019 (`flat`/`flatMap`,
+expressions régulières Unicode `\p{…}`), disponible depuis Firefox 78 et
+Safari 12. Les bibliothèques embarquées fixent le vrai plancher : pdf.js 3.11
+demande un navigateur récent (Firefox ≥ 102, Safari ≥ 15 environ), l'OCR
+(tesseract, WebAssembly SIMD) Safari ≥ 16.4. Le point le plus incertain est
+Safari en `file://` : l'outil crée ses workers à partir d'URL `blob:`, ce que
+Safari restreint parfois pour une page ouverte depuis le disque. À essayer
+avant de le conseiller sur Mac/iPad.
+
+Non vérifié : documents de plus de quelques dizaines de pages, mises en page à
+plus de deux colonnes, PDF avec formulaires ou couches OCR partiellement
+correctes. **Impression** (bouton « Imprimer ») : un document qui contient une
+page paysage (tableau large, E4) s'imprime avec l'orientation du réglage
+général ; le PDF téléchargé, lui, a bien ses pages paysage.
+
+## Décisions v0.3 appliquées dans le rendu
+
+| Décision | Ce que fait l'outil |
+|---|---|
+| E1 | Exemplaires identiques séparés par des lignes de découpe : un seul gardé (les autres restent dans le modèle, marqués en double) ; rien n'est fusionné à travers une ligne de découpe. |
+| E3 | Lignes d'écriture pointillées : jamais restituées, jamais prises pour un tableau. |
+| E4 / E7 | Tableau trop large pour la page portrait : page A4 **paysage**, corps 20 pt, 3 colonnes de données au plus par page, en-tête répété, colonne des pronoms retirée quand chaque forme la répète, titre repris avec « (1/3) ». Le reste du document reste en portrait. |
+| E5 | Mode Noir & Blanc : un mot que la couleur distinguait dans sa phrase passe en gras (souligné s'il l'était déjà). |
+| E6 | Petites images (mascottes) dans un tableau ou un encadré : icône à ~1,5 × le corps, à gauche de son libellé (au-dessus si la colonne est trop étroite). |
+| E8 | Pastille de numéro : rattachée à l'en-tête de collection (« Orthographe 7 »). |
+| E9 | Aucun italique. |
+| C1 | Contraste : toute couleur de texte est gardée si elle atteint 4,5:1 sur le fond réellement derrière elle (page, encadré, cellule), sinon assombrie (ou éclaircie) en gardant sa teinte. |
+| R4 | Caractères absents de Luciole remplacés à l'extraction (étoile → `*`, flèches → `→`, coches → `☑`), ciseaux retirés. |
+
+Non commencé : cartes mentales reconstruites (E2, lot 7), orientation des
+contenus pivotés (lot 3), trous/cases/soulignés des exercices (lot 4), mots
+encadrés et cerclés (lot 6), profils de collection (lot 8).
 
 ## Cadre légal — à lire avant usage au-delà du cercle familial
 
@@ -135,7 +167,7 @@ droit.
 | Composant | Licence | Source |
 |---|---|---|
 | Police **Luciole** | CC BY 4.0 | Laurent Bourcellier & Jonathan Perez, projet porté par le CTRDV — [luciole-vision.com](https://www.luciole-vision.com/) |
-| **pdf.js** (`pdfjs-dist@3.11.174`, patché — voir `tests/spike-notes.md` §1) | Apache-2.0 | Mozilla |
+| **pdf.js** (`pdfjs-dist@3.11.174`, patché pour charger son worker hors ligne — voir `src/00-lib-loader.js`) | Apache-2.0 | Mozilla |
 | **jsPDF** (`jspdf@4.2.1`) | MIT | jsPDF contributors |
 | **tesseract.js** (`7.0.0`) + **tesseract.js-core** (`7.0.0`, build `simd`, combiné legacy+LSTM) | Apache-2.0 | Tesseract.js / Tesseract OCR (Google, puis communauté) |
 | **fra.traineddata**, **osd.traineddata** (`tessdata_fast`) | Apache-2.0 | tesseract-ocr/tessdata_fast |
@@ -154,10 +186,11 @@ adaptateur-pdf/
   src/                          # code source (JS, CSS, gabarit HTML)
   assets/                       # bibliotheques tierces et donnees (non livrees seules)
   tests/
-    make_fixtures.py            # genere les fixtures de test
-    fixtures/                   # PDF de test (generes + fichiers d'erreur)
+    make_fixtures.py            # genere les fixtures de test (fpdf2 + Pillow)
+    fixtures_v03.py             # fixtures v0.3 : une par defaut du diagnostic (PDF brut)
+    fixtures/                   # PDF generes (non versionnes, cf. .gitignore)
     verify.sh                   # controles automatises sur un PDF produit
-    spike-notes.md              # notes techniques du spike de faisabilite (Phase 0)
+    regression/                 # suites de tests Node et Chrome, outil de corpus
 ```
 
 Pour reconstruire le fichier après une modification de `src/` ou `assets/` :
@@ -188,9 +221,10 @@ fort taux de symboles et d'un vocabulaire très pauvre — c'est-à-dire la
 signature mesurée d'une couche texte parasite de scanner (longueur 1,38,
 22-30 % de symboles), et elle seule.
 
-**Limite restante sur les listes** : les items sans puce textuelle sont
-agglomérés en paragraphes continus au lieu de rester un par ligne. Une liste de
-valise se lit donc comme un bloc de prose. Non corrigé.
+**Listes sans puce** (corrigé en v0.3) : une ligne qui s'arrête nettement avant
+le bord droit du texte alors que le mot suivant y aurait tenu est un retour à la
+ligne voulu : l'item suivant reste sur sa propre ligne au lieu d'être aggloméré
+en prose. Un titre sur deux lignes n'est pas concerné.
 
 ### PDF scannés — dégradé, relecture indispensable
 
@@ -227,25 +261,11 @@ Défauts identifiés et non résolus :
 
 ### Historique des versions
 
-| Fichier | État | Hors-vocabulaire |
-|---|---|---|
-| `adaptateur-pdf-luciole.html` (livré) | = addendum 4 | **5,32 %** |
-| `docs/archive/html-anciens/adaptateur-pdf-luciole.v-addendum5.html` | tentative suivante, **moins bonne** | 6,88 % |
-| — (non conservé) | première version | 5,07 % |
-
-Trois sessions de correctifs successives n'ont pas amélioré les indicateurs
-globaux : chaque heuristique corrigeant un symptôme en créait un autre. Le
-livrable est donc revenu à l'état addendum 4.
-
-**Mise à jour (périmé depuis Z6)** : la mise en garde ci-dessus datait d'un
-état intermédiaire où `src/` contenait la tentative « addendum 5 » (moins
-bonne). Ce n'est plus le cas : depuis Z6, `adaptateur-pdf-luciole.html` est
-systématiquement **reconstruit depuis `src/` par `build.py`**, et `src/`
-correspond bien au livrable (vérifié à chaque session : `python3 build.py`
-puis `git diff` sur le HTML généré ne doit rien montrer). L'essai
-« addendum 5 » n'a jamais été fusionné dans `src/` ; sa copie archivée reste
-consultable dans `docs/archive/html-anciens/`, à titre historique
-uniquement.
+Le livrable `adaptateur-pdf-luciole.html` est **toujours reconstruit depuis
+`src/`** par `build.py` (depuis Z6) ; l'intégration continue vérifie qu'une
+reconstruction ne change rien au fichier commité. L'OCR est gelé depuis
+l'addendum 6 (Z1) : le code est conservé dans `02-ocr-pipeline.js` sans être
+retravaillé, les mesures ci-dessus datent de cet état.
 
 ### Piste recommandée si le travail reprend
 

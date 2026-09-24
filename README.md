@@ -2,8 +2,9 @@
 
 Adaptateur de PDF pédagogiques pour élève basse vision (police Luciole,
 corps et couleurs réglables). Détails produit et limites connues :
-`adaptateur-pdf/README.md`. Plan en cours : `docs/PLAN-v0.3.md` (document de travail local, non publié :
-il cite les fiches du corpus).
+`adaptateur-pdf/README.md`. Plan en cours : `docs/PLAN-v0.3.md` et son
+diagnostic `docs/DIAGNOSTIC-v0.3.md` (documents de travail locaux, non
+publiés : ils citent les fiches du corpus ; `.gitignore` les écarte).
 
 ## Où est quoi
 
@@ -13,6 +14,7 @@ Loupiote/
   .gitignore
   docs/
     PLAN-v0.3.md                # plan en cours (phases, lots) — local, non publié
+    DIAGNOSTIC-v0.3.md           # diagnostic outillé des 43 fiches — local, non publié
     DECISIONS.md                 # décisions encore en vigueur, une ligne par décision
     archive/
       PLAN-adaptateur-pdf-luciole.md   # mémoire historique (addenda 1-6)
@@ -34,7 +36,8 @@ Loupiote/
     build.py                    # reconstruit le livrable depuis src/
     src/                        # code source (JS, CSS, gabarit HTML)
     assets/                     # polices, bibliothèques tierces, données OCR
-    tests/                      # fixtures, verify.sh, harnais de non-régression
+    tests/                      # générateurs de fixtures, verify.sh, suites de tests
+  .github/workflows/tests.yml    # intégration continue (sans le corpus)
 ```
 
 Les 43 fiches du corpus (éditions Retz, un roman jeunesse scanné) sont des
@@ -56,12 +59,23 @@ cd adaptateur-pdf && python3 build.py
 ## Lancer les tests
 
 ```bash
-cd adaptateur-pdf/tests/regression
-npm install          # une seule fois
-npm test              # invariants structurels (harnais Node pur)
-npm run test:visuel   # pilote le vrai livrable dans Chrome, invariants visuels
-npm run corpus         # campagne complète sur les 43 fiches (galerie + métriques + régression)
+cd adaptateur-pdf/tests
+pip install fpdf2 pillow       # une seule fois
+python3 make_fixtures.py       # regenere tests/fixtures/ (PDF non versionnes)
+cd regression
+npm install                    # une seule fois
+npm test                       # invariants structurels + tests v0.3 (harnais Node pur)
+npm run test:navigateur        # fixtures dans le vrai livrable, sous Chrome
+npm run test:visuel            # 3 fiches de reference du corpus, sous Chrome (local)
+npm run corpus -- --compare    # campagne complete sur les 43 fiches (local)
 ```
+
+Sur un clone du dépôt public, les fiches du corpus sont absentes : les tests
+qui en dépendent sont **ignorés, et le disent** (`CORPUS_OBLIGATOIRE=1` en
+fait un échec). L'intégration continue (`.github/workflows/tests.yml`)
+vérifie à chaque envoi : aucun PDF versionné, livrable reproductible depuis
+`src/`, `npm test` et `npm run test:navigateur`. La campagne sur le corpus
+reste à lancer sur le poste qui a les fiches, **avant toute fusion**.
 
 Voir `adaptateur-pdf/tests/regression/README.md` pour le détail et les
 limites de chaque suite.
