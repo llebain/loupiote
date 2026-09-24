@@ -49,8 +49,8 @@ def main():
         "osdTraineddata": b64_file(ASSETS / "tessdata" / "osd.traineddata"),
         "lucioleRegular": b64_file(ASSETS / "fonts" / "Luciole-Regular.ttf"),
         "lucioleBold": b64_file(ASSETS / "fonts" / "Luciole-Bold.ttf"),
-        "lucioleItalic": b64_file(ASSETS / "fonts" / "Luciole-Regular-Italic.ttf"),
-        "lucioleBoldItalic": b64_file(ASSETS / "fonts" / "Luciole-Bold-Italic.ttf"),
+        # v0.3 (E9) : polices italiques non embarquees, aucun italique n'est
+        # jamais rendu. Les fichiers restent dans assets/fonts/ (licence).
         "frWordlist": b64_file(ASSETS / "wordlist" / "fr-2000.txt"),
     }
     assets_json = json.dumps(assets, separators=(",", ":"))

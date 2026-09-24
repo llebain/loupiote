@@ -5,8 +5,9 @@
   "description": "Suite de non-regression pour l'adaptateur PDF Luciole (ADDENDUM 6, Z9). Outillage de TEST uniquement -- ne fait jamais partie du livrable adaptateur-pdf-luciole.html (voir README du projet : aucune dependance reseau a l'execution de l'outil lui-meme). Ces dependances npm ne servent qu'a faire tourner les tests en local/CI, jamais embarquees dans le fichier livre.",
   "type": "module",
   "scripts": {
-    "test": "node run.mjs",
+    "test": "node run.mjs && node v03.mjs",
     "test:visuel": "node visual.mjs",
+    "test:navigateur": "node v03-navigateur.mjs",
     "corpus": "node corpus.mjs"
   },
   "devDependencies": {

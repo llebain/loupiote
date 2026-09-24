@@ -180,7 +180,9 @@
   // Rend une liste de lignes (format commun flux/boite/cellule, cf.
   // 03-layout-engine.js) dans un conteneur DOM deja positionne, a l'echelle
   // d'affichage donnee.
-  function renderLinesInto(container, lines, scale, settings, theme, estCellule) {
+  // `bg` (v0.3, C1) : fond reellement derriere ces lignes (page, boite,
+  // cellule) -- meme valeur que l'export PDF (04-pdf-export.js).
+  function renderLinesInto(container, lines, scale, settings, theme, estCellule, bg) {
     for (const line of lines) {
       const lineDiv = document.createElement('div');
       lineDiv.className = 'ligne';
@@ -202,10 +204,10 @@
       lineDiv.style.wordSpacing = settings.wordSpacing === 'elargi' ? '0.4em' : 'normal';
       for (const seg of line.segments) {
         const span = document.createElement('span');
-        if (seg.style === 'bold' || seg.style === 'bolditalic') span.style.fontWeight = 'bold';
-        if (seg.style === 'italic' || seg.style === 'bolditalic') span.style.fontStyle = 'italic';
-        if (seg.strikethrough) span.style.textDecoration = 'line-through';
-        span.style.color = rgbCss(window.LayoutEngine.resolveTextColor(seg.color, settings, theme));
+        if (seg.style === 'bold') span.style.fontWeight = 'bold'; // E9 : jamais d'italique
+        const deco = [seg.strikethrough ? 'line-through' : '', seg.underline ? 'underline' : ''].filter(Boolean).join(' ');
+        if (deco) span.style.textDecoration = deco;
+        span.style.color = rgbCss(window.LayoutEngine.resolveTextColor(seg.color, settings, theme, bg));
         span.textContent = seg.text;
         lineDiv.appendChild(span);
       }
@@ -275,7 +277,7 @@
           im.style.height = Math.round(item.height * scale) + 'px';
           pageDiv.appendChild(im);
         } else if (item.kind === 'flow') {
-          renderLinesInto(pageDiv, item.lines, scale, settings, theme);
+          renderLinesInto(pageDiv, item.lines, scale, settings, theme, false, window.LayoutEngine.hexToRgbArr(theme.bg));
         } else if (item.kind === 'box') {
           // Coordonnees de lignes deja ABSOLUES (page), cf. computeBlockLayout
           // -- rendu a plat sur la page, la boite n'est qu'un rectangle de
@@ -303,7 +305,7 @@
           boxDiv.style.background = rgbCss(colors.fill);
           boxDiv.style.borderColor = rgbCss(colors.stroke);
           pageDiv.appendChild(boxDiv);
-          renderLinesInto(pageDiv, item.lines, scale, settings, theme);
+          renderLinesInto(pageDiv, item.lines, scale, settings, theme, false, colors.fill);
           if (settings.showImages) renderImagesInto(pageDiv, item.images, scale);
         } else if (item.kind === 'table') {
           for (const row of item.rows) {
@@ -320,12 +322,14 @@
               // depuis la boite de fond source par computeBlockLayout
               // (03-layout-engine.js) ; meme resolution que le fond d'une
               // boite (respecte le mode Noir&Blanc).
+              let cellBg = window.LayoutEngine.hexToRgbArr(theme.bg);
               if (cell.fill) {
                 const cellColors = window.LayoutEngine.resolveContainerColors(cell.fill, null, settings, theme);
                 cellDiv.style.background = rgbCss(cellColors.fill);
+                cellBg = cellColors.fill;
               }
               pageDiv.appendChild(cellDiv);
-              renderLinesInto(pageDiv, cell.lines, scale, settings, theme, true);
+              renderLinesInto(pageDiv, cell.lines, scale, settings, theme, true, cellBg);
               if (settings.showImages) renderImagesInto(pageDiv, cell.images, scale);
             }
           }

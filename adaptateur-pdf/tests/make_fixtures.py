@@ -175,6 +175,66 @@ def fixture_3_scan():
     img_path.unlink()
 
 
+def fixture_7_mascottes():
+    """v0.3 (E6/T2) : tableau dont les en-tetes portent une petite image
+    (mascotte ~30 pt) a cote du libelle -- les images de moins de 53 pt
+    etaient jetees. Utilise fpdf2 + PIL (images bitmap)."""
+    from PIL import Image, ImageDraw
+    paths = []
+    for i, col in enumerate([(230, 90, 60), (60, 140, 220), (90, 180, 90)]):
+        img = Image.new('RGB', (120, 120), 'white')
+        d = ImageDraw.Draw(img)
+        d.ellipse((10, 10, 110, 110), fill=col, outline=(0, 0, 0), width=4)
+        d.ellipse((35, 40, 50, 55), fill=(0, 0, 0)); d.ellipse((70, 40, 85, 55), fill=(0, 0, 0))
+        pth = FIXDIR / f"_tmp_mascotte{i}.png"
+        img.save(pth)
+        paths.append(pth)
+    pdf = FPDF(format='A4', unit='pt')
+    pdf.add_page()
+    pdf.set_font('Helvetica', 'B', 16)
+    pdf.set_xy(56, 60)
+    pdf.cell(0, 20, "Les classes de mots")
+    x0, y0, cw, rh = 56, 110, 160, 40
+    labels = ["Determinant", "Nom", "Adjectif"]
+    # Grille en TRAITS (comme les fiches du corpus), pas en rectangles.
+    for r in range(4):
+        pdf.line(x0, y0 + r * rh, x0 + 3 * cw, y0 + r * rh)
+    for c in range(4):
+        pdf.line(x0 + c * cw, y0, x0 + c * cw, y0 + 3 * rh)
+    for c in range(3):
+        pdf.image(str(paths[c]), x=x0 + c * cw + 6, y=y0 + 5, w=30, h=30)
+        pdf.set_font('Helvetica', 'B', 12)
+        pdf.set_xy(x0 + c * cw + 42, y0 + 12)
+        pdf.cell(100, 16, labels[c])
+    rows = [["le", "chat", "noir"], ["une", "maison", "grande"]]
+    pdf.set_font('Helvetica', '', 12)
+    for r, row in enumerate(rows, start=1):
+        for c, txt in enumerate(row):
+            pdf.set_xy(x0 + c * cw + 8, y0 + r * rh + 12)
+            pdf.cell(100, 16, txt)
+    pdf.set_xy(56, 260)
+    pdf.multi_cell(480, 16, PARA1)
+    pdf.output(str(FIXDIR / "07-mascottes.pdf"))
+    for pth in paths:
+        pth.unlink()
+
+
+def fixtures_erreur():
+    """Fixtures d'erreur citees par le README : PDF protege par mot de
+    passe, fichier corrompu. Verifiees par v03-navigateur.mjs (message
+    d'erreur explicite, pas de plantage)."""
+    (FIXDIR / "erreur-corrompu.pdf").write_bytes(b"%PDF-1.4\n" + b"\x00\xff ceci n'est pas un PDF " * 40)
+    try:
+        pdf = FPDF(format='A4', unit='mm')
+        pdf.set_encryption(owner_password="proprietaire", user_password="secret")
+        pdf.add_page()
+        pdf.set_font('Helvetica', '', 12)
+        pdf.multi_cell(0, 7, PARA1)
+        pdf.output(str(FIXDIR / "erreur-mot-de-passe.pdf"))
+    except Exception as e:  # chiffrement indisponible (module cryptography absent)
+        print("  (fixture mot de passe non generee :", e, ")")
+
+
 if __name__ == "__main__":
     fixture_1_hierarchie()
     fixture_2_deux_colonnes()
@@ -182,6 +242,12 @@ if __name__ == "__main__":
     fixture_4_entete_pied()
     fixture_5_avec_images()
     fixture_6_page_dense()
+    fixture_7_mascottes()
+    fixtures_erreur()
+    # Fixtures du plan v0.3 : une par defaut du diagnostic (PDF brut, sans
+    # dependance, cf. fixtures_v03.py).
+    import fixtures_v03
+    fixtures_v03.generer(FIXDIR)
     print("Fixtures generees dans", FIXDIR)
     for f in sorted(FIXDIR.glob("*.pdf")):
         print(" -", f.name, f.stat().st_size, "octets")

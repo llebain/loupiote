@@ -1,0 +1,34 @@
+# Depot PUBLIC. Les fiches du corpus (editions Retz, roman jeunesse scanne)
+# sont des oeuvres protegees et ne doivent JAMAIS etre versionnees ni
+# publiees (README, section « Ou est quoi ») : ce fichier empeche qu'une
+# copie du corpus dans ce clone soit proposee au commit par erreur.
+
+# Aucun PDF, nulle part (les fixtures de test se regenerent :
+# adaptateur-pdf/tests/make_fixtures.py).
+*.pdf
+
+# Corpus : tout, sauf les metriques de reference (nombres et statuts
+# seulement, cf. adaptateur-pdf/tests/regression/README.md).
+corpus/*
+!corpus/_reference/
+corpus/_reference/*
+!corpus/_reference/metrics.json
+
+# Anciennes sources de test (v0.1/v0.2) et documents de travail locaux qui
+# citent les fiches du corpus.
+test/
+docs/PLAN-v0.3.md
+docs/DIAGNOSTIC-v0.3.md
+docs/archive/
+publication.txt
+**/baseline-*.jsonl
+**/*verite-terrain*
+adaptateur-pdf/tests/spike-notes.md
+
+# Sorties generees
+adaptateur-pdf/tests/fixtures/
+adaptateur-pdf/tests/regression/sorties-*/
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store

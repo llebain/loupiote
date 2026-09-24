@@ -26,3 +26,5 @@ sont locaux et non publiés (ils citent les fiches du corpus).
 | E6 (défaut) | Mascottes conservées en petite icône à côté de leur libellé | `docs/PLAN-v0.3.md` §5 |
 | E7 (défaut) | Paysage page par page, réservé aux tableaux larges (E4) ; les cartes reconstruites restent en portrait | `docs/PLAN-v0.3.md` §5 |
 | E8 (défaut) | En-têtes de collection et pastilles de numéro : une ligne discrète en haut (« Orthographe 7 ») | `docs/PLAN-v0.3.md` §5 |
+| C1 | Contraste texte/fond **≥ 4,5:1** partout (fond réel : page, encadré ou cellule) ; en dessous, couleur source assombrie/éclaircie en gardant sa teinte, gris et blanc remplacés par la couleur du thème | `docs/DIAGNOSTIC-v0.3.md` §5 (règle proposée), appliquée en v0.3 ; seuil unique 4,5 (pas de seuil « grand texte ») |
+| R4 | Caractères absents de Luciole substitués **à l'extraction** (étoile → `*`, flèches → `→`, coches → `☑`, ciseaux retirés, forme de compatibilité Unicode sinon) | `docs/PLAN-v0.3.md` §7, lot 1 |

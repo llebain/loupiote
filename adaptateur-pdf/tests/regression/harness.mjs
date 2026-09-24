@@ -41,8 +41,6 @@ export async function setup() {
       frWordlist: Buffer.from('le\nun\nune\nde\nles\nla\net\nest\nque\nqui\ndans\npour\n').toString('base64'),
       lucioleRegular: b64('Luciole-Regular.ttf'),
       lucioleBold: b64('Luciole-Bold.ttf'),
-      lucioleItalic: b64('Luciole-Regular-Italic.ttf'),
-      lucioleBoldItalic: b64('Luciole-Bold-Italic.ttf'),
     },
   };
   global.window = win;

@@ -1,0 +1,53 @@
+# Tests de l'adaptateur PDF sur le depot public (sans le corpus, qui n'est
+# jamais publie) : fixtures synthetiques, invariants structurels, tests v0.3
+# et tests dans Chrome. La campagne sur les 43 fiches (`npm run corpus --
+# --compare`) reste a lancer localement, sur le poste qui a le corpus.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: adaptateur-pdf
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Aucun PDF versionne
+        run: |
+          if git ls-files '*.pdf' '*.PDF' | grep -q .; then
+            echo "PDF versionne(s) -- interdit dans le depot public :"; git ls-files '*.pdf' '*.PDF'; exit 1
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Livrable reproductible depuis src/
+        run: |
+          python3 build.py
+          git diff --exit-code -- adaptateur-pdf-luciole.html || { echo "adaptateur-pdf-luciole.html ne correspond pas a src/ : relancer python3 build.py et commiter"; exit 1; }
+
+      - name: Fixtures
+        run: |
+          pip install fpdf2 pillow
+          python3 tests/make_fixtures.py
+
+      - name: Dependances de test
+        working-directory: adaptateur-pdf/tests/regression
+        run: npm ci
+
+      - name: Invariants + tests v0.3
+        working-directory: adaptateur-pdf/tests/regression
+        run: npm test
+
+      - name: Tests dans Chrome
+        working-directory: adaptateur-pdf/tests/regression
+        run: npm run test:navigateur

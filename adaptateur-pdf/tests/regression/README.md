@@ -22,10 +22,47 @@ structurels :
 ## Usage
 
 ```bash
-cd tests/regression
+cd tests
+python3 make_fixtures.py   # fixtures regenerees (fpdf2 + Pillow), non versionnees
+cd regression
 npm install   # une seule fois
-npm test
+npm test      # run.mjs (invariants) puis v03.mjs (tests v0.3)
 ```
+
+Sur un clone du depot public, les 3 fiches du corpus sont absentes : leurs
+tests sont ignores, avec un message (`CORPUS_OBLIGATOIRE=1` en fait un echec).
+Tous les scripts pilotant Chrome acceptent `CHROME_PATH=/chemin/chrome` a la
+place du Chrome installe (`channel: 'chrome'`).
+
+## Tests v0.3 (`v03.mjs`, `v03-navigateur.mjs`)
+
+`tests/fixtures_v03.py` fabrique une fixture par defaut du diagnostic v0.3
+(`docs/DIAGNOSTIC-v0.3.md`, local), en PDF « brut » (flux de contenu ecrit a
+la main) pour reproduire exactement le MECANISME observe sur les fiches, sans
+en reprendre le texte : couleur d'une case qui fuit sur le texte (R2), trous
+et titres pales (C1), etoile/fleche/ciseaux absents de Luciole (R4),
+exposants (R5), italique (E9), runs desynchronises du texte (R1, cause des
+gels), mot en deux couleurs coupe en fin de ligne (W1), faux tableaux (S6),
+exemplaires separes par des lignes de decoupe (E1), tableau de conjugaison
+large (E4), liste sans puce, pastille de numero (E8), transformations
+imbriquees. Chaque test de `v03.mjs` echouait avant son correctif (129 echecs
+sur le code du 23/09/2026), chaque fixture est rejouee a 24 pt, 20 pt N&B et
+32 pt jaune/bleu, avec des invariants communs (A4 portrait ou paysage, aucun
+debordement, aucun italique, contraste >= 4,5:1, aucun glyphe absent, aucun
+`[garde-fou]` declenche).
+
+`v03-navigateur.mjs` rejoue une partie de ces fixtures dans le vrai livrable
+sous Chrome (images et mascottes en icone, apercu paysage, erreurs JS,
+requetes reseau, fichiers corrompu / protege par mot de passe). `SHOTS=1`
+ajoute des captures dans `sorties-visuelles/`.
+
+`dump.mjs` : outil de diagnostic (blocs, tableaux, regions, lignes de sortie
+d'un PDF), a ne pas utiliser pour produire quoi que ce soit de publie a
+partir d'une fiche du corpus.
+
+**Limite** : ces fixtures ne remplacent pas `npm run corpus -- --compare` sur
+les 43 fiches (plan v0.3, §0 et §9) -- elles prouvent qu'un mecanisme est
+corrige, pas qu'aucune fiche ne regresse.
 
 ## Ce que cette suite NE remplace PAS
 
