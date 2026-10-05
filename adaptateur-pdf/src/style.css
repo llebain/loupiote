@@ -152,6 +152,50 @@ main {
   margin: 0.6em 0;
 }
 
+/* Relecture du texte : editeur a cote de l'apercu quand la place le permet. */
+#espace-travail { display: block; }
+#espace-travail.avec-editeur {
+  display: grid;
+  grid-template-columns: minmax(300px, 40%) 1fr;
+  gap: 1.2em;
+  align-items: start;
+}
+@media (max-width: 1200px) {
+  #espace-travail.avec-editeur { grid-template-columns: 1fr; }
+}
+#editeur {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.8em 1em;
+  position: sticky;
+  top: 5.5em;
+  max-height: calc(100vh - 7em);
+  overflow-y: auto;
+}
+#editeur[hidden] { display: none; }
+#editeur h2 { margin: 0.2em 0; }
+#editeur fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 0 0 0.8em 0; padding: 0.4em 0.8em; }
+#editeur label { font-weight: 600; }
+#editeur-texte {
+  display: block;
+  width: 100%;
+  font-family: "Luciole", sans-serif;
+  font-size: 1.1em;
+  line-height: 1.5;
+  padding: 0.6em;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  resize: vertical;
+  min-height: 12em;
+}
+.editeur-actions { display: flex; flex-wrap: wrap; gap: 0.6em; margin: 0.8em 0 0.4em; }
+#editeur-etat { min-height: 1.4em; font-weight: 600; margin: 0.2em 0; }
+
+.case-a-cocher { margin: 0.6em 0; display: flex; gap: 0.5em; align-items: flex-start; }
+.case-a-cocher input { flex: none; width: 24px; height: 24px; min-width: 24px; margin-top: 0.2em; }
+.case-a-cocher label { display: inline !important; margin: 0 !important; font-weight: normal !important; }
+
 #apercu {
   display: flex;
   flex-direction: column;
@@ -190,9 +234,12 @@ main {
   border-width: 1px;
   box-sizing: border-box;
 }
+/* Legende « Page n / N » AU-DESSUS de chaque page de l'apercu : jamais sur
+   la page ni a l'impression (retour de test : la numerotation inutile). */
 .numero-page {
   font-size: 0.9em;
   color: #444;
+  margin-bottom: -0.8em;
 }
 
 /* Mention legale -- ADDENDUM 2 (section J) : vrai texte, jamais une image,
@@ -216,6 +263,7 @@ footer.mention-legale {
 }
 
 @media print {
-  header.app-header, #panel-reglages, #barre-action, #dropzone, footer.mention-legale { display: none; }
+  header.app-header, #panel-reglages, #barre-action, #dropzone, footer.mention-legale, #editeur, .numero-page { display: none; }
+  #espace-travail.avec-editeur { display: block; }
   .page-apercu { box-shadow: none; border: none; page-break-after: always; }
 }

@@ -319,7 +319,9 @@ async function main() {
       const texteSource = blocks
         // v0.3 (E1) : exemplaires en double exclus du texte attendu -- la
         // couverture se mesure apres dedoublonnage (plan v0.3, §7, 0.2).
-        .filter((b) => !b.secondary && !b.frontMatter && !b.duplicate && b.type !== 'needs-ocr')
+        // En-tetes, pieds de page et numeros (`headerFooter`, masques par
+        // defaut depuis le retour de test du 05/10/2026) : pas du texte attendu.
+        .filter((b) => !b.secondary && !b.frontMatter && !b.duplicate && !b.headerFooter && b.type !== 'needs-ocr')
         .map((b) => (b.runs || []).map((r) => r.text || '').join(''))
         .join(' ');
       return { pagesApercu: pages.length, over, texteSource, blocksDisponibles: !!window.__DEBUG_BLOCKS__ };

@@ -7,7 +7,9 @@
 (function () {
   'use strict';
 
-  const LS_KEY = 'adaptateur-pdf-luciole:reglages:v1';
+  // v2 (05/10/2026) : la taille par defaut passe de 24 a 20 pt ; les reglages
+  // enregistres par l'ancienne version (qui y avait fige 24) sont abandonnes.
+  const LS_KEY = 'adaptateur-pdf-luciole:reglages:v2';
 
   const els = {};
   function q(id) { return document.getElementById(id); }
@@ -17,7 +19,11 @@
   let measurementDoc = null;
   let measurer = null;
 
-  let masterBlocks = null; // tous les blocs extraits (avant filtrage pages de garde)
+  let masterBlocks = null; // tous les blocs extraits (avant filtrage pages de garde), jamais modifies
+  let workingBlocks = null; // masterBlocks apres les corrections de texte (mode « blocs », 04b-text-edit.js)
+  let plainText = null; // non nul : le document est reconstruit depuis ce texte brut (mode « texte simple »)
+  let editorOpen = false;
+  let editorSnapshot = null; // { mode, text } au moment du remplissage du panneau : detecte les modifications non appliquees
   let masterExtraction = null; // pageShapes/pageSizes de l'extraction (ADDENDUM 6, Z4.4 : moteur par blocs)
   let currentBlocks = null; // blocs effectivement utilises pour la mise en page (apres filtrage)
   let currentLayout = null;
@@ -36,6 +42,7 @@
       const prev = out[out.length - 1];
       if (
         prev && prev.type === 'p' && b.type === 'p' &&
+        !prev.headerFooter && !b.headerFooter &&
         prev.runs.length && b.runs.length
       ) {
         const prevLastRun = prev.runs[prev.runs.length - 1];
@@ -141,6 +148,8 @@
       orientation: els.orientation.value,
       skipFrontMatter: els.ignorerPagesGarde.checked,
       colorMode: els.couleur.value,
+      simplified: els.simplifie.checked,
+      showHeaderFooter: els.entetesPieds.checked,
     });
   }
 
@@ -155,6 +164,8 @@
     els.ignorerPagesGarde.checked = s.skipFrontMatter !== false;
     els.orientation.value = s.orientation;
     els.couleur.value = s.colorMode;
+    els.simplifie.checked = s.simplified === true;
+    els.entetesPieds.checked = s.showHeaderFooter === true;
   }
 
   function setProgress(text, active) {
@@ -282,7 +293,7 @@
           // Coordonnees de lignes deja ABSOLUES (page), cf. computeBlockLayout
           // -- rendu a plat sur la page, la boite n'est qu'un rectangle de
           // fond/bordure dessine derriere, pas un conteneur de positionnement.
-          if (item.outerWrap) {
+          if (item.outerWrap && !settings.simplified) {
             const wrapColors = window.LayoutEngine.resolveContainerColors(item.outerWrap.fill, item.outerWrap.stroke, settings, theme);
             const wrapDiv = document.createElement('div');
             wrapDiv.className = 'bloc-boite';
@@ -296,15 +307,17 @@
             pageDiv.appendChild(wrapDiv);
           }
           const colors = window.LayoutEngine.resolveContainerColors(item.fill, item.stroke, settings, theme);
-          const boxDiv = document.createElement('div');
-          boxDiv.className = 'bloc-boite';
-          boxDiv.style.left = Math.round(item.x * scale) + 'px';
-          boxDiv.style.top = Math.round(item.y * scale) + 'px';
-          boxDiv.style.width = Math.round(item.width * scale) + 'px';
-          boxDiv.style.height = Math.round(item.height * scale) + 'px';
-          boxDiv.style.background = rgbCss(colors.fill);
-          boxDiv.style.borderColor = rgbCss(colors.stroke);
-          pageDiv.appendChild(boxDiv);
+          if (!settings.simplified) { // mode simplifie : aucun cadre ni fond de boite
+            const boxDiv = document.createElement('div');
+            boxDiv.className = 'bloc-boite';
+            boxDiv.style.left = Math.round(item.x * scale) + 'px';
+            boxDiv.style.top = Math.round(item.y * scale) + 'px';
+            boxDiv.style.width = Math.round(item.width * scale) + 'px';
+            boxDiv.style.height = Math.round(item.height * scale) + 'px';
+            boxDiv.style.background = rgbCss(colors.fill);
+            boxDiv.style.borderColor = rgbCss(colors.stroke);
+            pageDiv.appendChild(boxDiv);
+          }
           renderLinesInto(pageDiv, item.lines, scale, settings, theme, false, colors.fill);
           if (settings.showImages) renderImagesInto(pageDiv, item.images, scale);
         } else if (item.kind === 'table') {
@@ -336,10 +349,11 @@
         }
       }
 
+      // Legende hors de la page (jamais imprimee ni exportee).
       const num = document.createElement('div');
       num.className = 'numero-page';
       num.textContent = 'Page ' + (idx + 1) + ' / ' + layout.pages.length;
-      pageDiv.appendChild(num);
+      els.apercu.appendChild(num);
 
       els.apercu.appendChild(pageDiv);
     });
@@ -364,19 +378,137 @@
     if (!masterBlocks) return;
     const settings = readSettingsFromUI();
     saveSettings(settings);
-    // ADDENDUM 4, section T.2 : filtrage reversible des pages de garde/
-    // copyright, sans reextraire ni reOCRiser (la case peut etre decochee).
-    currentBlocks = settings.skipFrontMatter
-      ? masterBlocks.filter((b) => !b.frontMatter)
-      : masterBlocks;
-    currentLayout = window.LayoutEngine.computeBlockLayoutForDocument(masterExtraction, currentBlocks, settings, measurer);
+    // Corrections de texte tapees mais pas encore appliquees : on les prend
+    // en compte avant de recalculer, pour ne jamais les perdre au changement
+    // d'un reglage.
+    if (editorOpen && editorIsDirty()) commitEditor(settings);
+    let blocks, extraction;
+    if (plainText !== null) {
+      // Mode « texte simple » : le document est reconstruit depuis le texte.
+      const plain = window.TextEdit.plainDocument(plainText);
+      blocks = plain.blocks;
+      extraction = plain.extraction;
+    } else {
+      // ADDENDUM 4, section T.2 : filtrage reversible des pages de garde/
+      // copyright, sans reextraire ni reOCRiser (la case peut etre decochee).
+      blocks = settings.skipFrontMatter
+        ? workingBlocks.filter((b) => !b.frontMatter)
+        : workingBlocks;
+      extraction = masterExtraction;
+    }
+    currentBlocks = blocks;
+    currentLayout = window.LayoutEngine.computeBlockLayoutForDocument(extraction, currentBlocks, settings, measurer);
     window.__DEBUG_LAYOUT__ = currentLayout; // diagnostic (tests/verify.sh) -- inoffensif
     clearMessages();
     renderPreview(currentLayout);
     els.btnTelecharger.disabled = false;
     els.btnImprimer.disabled = false;
+    els.btnModifierTexte.disabled = false;
+    if (editorOpen) fillEditor(settings);
   }
 
+  // --- Relecture du texte (04b-text-edit.js) --------------------------------
+
+  function editorMode() {
+    return els.editeurModeBrut.checked ? 'brut' : 'blocs';
+  }
+
+  function editorStatus(text) { els.editeurEtat.textContent = text || ''; }
+
+  // Remplit le panneau avec le texte actuellement affiche.
+  function fillEditor(settings) {
+    settings = settings || readSettingsFromUI();
+    let text;
+    if (editorMode() === 'brut' && plainText !== null) {
+      text = plainText;
+    } else {
+      const visible = window.TextEdit.visibleBlocks(workingBlocks, settings);
+      text = window.TextEdit.joinParagraphs(visible.map(window.TextEdit.blockText));
+    }
+    els.editeurTexte.value = text;
+    editorSnapshot = { mode: editorMode(), text };
+    const n = window.TextEdit.parseParagraphs(text).length;
+    editorStatus(n + ' paragraphe' + (n > 1 ? 's' : '') + (plainText !== null ? ' — texte simple' : (isTextEdited() ? ' — texte modifié' : '')));
+  }
+
+  function isTextEdited() {
+    return workingBlocks.length !== masterBlocks.length || workingBlocks.some((b) => b.edited || b.added);
+  }
+
+  function editorIsDirty() {
+    return !!editorSnapshot && els.editeurTexte.value !== editorSnapshot.text;
+  }
+
+  // Reporte le texte du panneau sur le document.
+  function commitEditor(settings) {
+    settings = settings || readSettingsFromUI();
+    const text = els.editeurTexte.value;
+    if (editorMode() === 'brut') {
+      plainText = text;
+    } else {
+      plainText = null;
+      workingBlocks = window.TextEdit.applyEdit(workingBlocks, window.TextEdit.parseParagraphs(text), settings);
+    }
+    editorSnapshot = { mode: editorMode(), text };
+  }
+
+  function openEditor(open) {
+    editorOpen = open;
+    els.editeur.hidden = !open;
+    els.espaceTravail.classList.toggle('avec-editeur', open);
+    els.btnModifierTexte.setAttribute('aria-expanded', open ? 'true' : 'false');
+    els.btnModifierTexte.textContent = open ? 'Fermer le texte' : 'Modifier le texte';
+    if (open) {
+      els.editeurModeBlocs.checked = plainText === null;
+      els.editeurModeBrut.checked = plainText !== null;
+      fillEditor();
+      els.editeurTexte.focus();
+    }
+  }
+
+  function wireEditorEvents() {
+    els.btnModifierTexte.addEventListener('click', () => {
+      if (!masterBlocks) return;
+      if (editorOpen && editorIsDirty()) commitEditor(); // fermer ne perd jamais une saisie
+      const wasOpen = editorOpen;
+      openEditor(!wasOpen);
+      if (wasOpen) recomputeLayoutAndRender();
+    });
+    els.btnAppliquerTexte.addEventListener('click', () => {
+      if (!masterBlocks) return;
+      commitEditor();
+      editorSnapshot = null; // force le recalcul, meme sans modification (changement de mode)
+      recomputeLayoutAndRender();
+      editorStatus('Modifications appliquées.');
+    });
+    els.btnRestaurerTexte.addEventListener('click', () => {
+      if (!masterBlocks) return;
+      workingBlocks = masterBlocks;
+      plainText = null;
+      els.editeurModeBlocs.checked = true;
+      editorSnapshot = null;
+      recomputeLayoutAndRender();
+      editorStatus('Texte d’origine restauré.');
+    });
+    [els.editeurModeBlocs, els.editeurModeBrut].forEach((radio) => {
+      radio.addEventListener('change', () => {
+        // Blocs -> texte simple : le texte tape est conserve tel quel.
+        // Texte simple -> blocs : le panneau reprend le texte du document
+        // structure (une saisie non appliquee est abandonnee).
+        if (editorMode() === 'blocs') {
+          const dirty = editorIsDirty();
+          fillEditor();
+          if (dirty) editorStatus('Modifications non appliquées abandonnées.');
+        } else {
+          editorSnapshot = { mode: 'brut', text: els.editeurTexte.value };
+          editorStatus('Après « Appliquer », le document ne gardera que ce texte.');
+        }
+      });
+    });
+    els.editeurTexte.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); els.btnAppliquerTexte.click(); }
+    });
+  }
   async function handleDownload() {
     const doc = window.PdfExport.createExportDoc(jsPDFCtor, currentLayout.pages[0].pageDims);
     window.PdfExport.renderLayoutToPdf(doc, currentLayout, currentFileName);
@@ -440,6 +572,11 @@
     els.btnTelecharger.disabled = true;
     els.btnImprimer.disabled = true;
     masterBlocks = null;
+    workingBlocks = null;
+    plainText = null;
+    editorSnapshot = null;
+    openEditor(false);
+    els.btnModifierTexte.disabled = true;
     masterExtraction = null;
     currentBlocks = null;
     currentLayout = null;
@@ -555,6 +692,7 @@
     }
 
     masterBlocks = blocks;
+    workingBlocks = blocks;
     masterExtraction = extraction; // pageShapes/pageSizes (ADDENDUM 6, Z4.4) -- geometrie inchangee par le filtrage de blocs
     window.__DEBUG_BLOCKS__ = blocks; // diagnostic (tests/verify.sh, developpement) -- inoffensif
     setProgress('', false);
@@ -562,12 +700,15 @@
   }
 
   function wireSettingsEvents() {
-    ['taille', 'interligne', 'contraste', 'espacementCar', 'espacementMot', 'images', 'orientation', 'doublePage', 'ignorerPagesGarde', 'couleur'].forEach((key) => {
+    ['taille', 'interligne', 'contraste', 'espacementCar', 'espacementMot', 'images', 'orientation', 'doublePage', 'ignorerPagesGarde', 'couleur', 'simplifie', 'entetesPieds'].forEach((key) => {
       els[key].addEventListener('input', () => {
         if (key === 'taille') els.valeurTaille.textContent = els.taille.value;
+        // Texte simplifie : le texte seul, donc sans images ; reste reglable ensuite.
+        if (key === 'simplifie') els.images.value = els.simplifie.checked ? 'masquer' : 'conserver';
         if (masterBlocks) recomputeLayoutAndRender();
       });
       els[key].addEventListener('change', () => {
+        if (key === 'simplifie') els.images.value = els.simplifie.checked ? 'masquer' : 'conserver';
         if (masterBlocks) recomputeLayoutAndRender();
       });
     });
@@ -619,6 +760,17 @@
     els.orientation = q('reglage-orientation');
     els.couleur = q('reglage-couleur');
     els.doublePage = q('reglage-double-page');
+    els.simplifie = q('reglage-simplifie');
+    els.entetesPieds = q('reglage-entetes-pieds');
+    els.btnModifierTexte = q('btn-modifier-texte');
+    els.espaceTravail = q('espace-travail');
+    els.editeur = q('editeur');
+    els.editeurModeBlocs = q('editeur-mode-blocs');
+    els.editeurModeBrut = q('editeur-mode-brut');
+    els.editeurTexte = q('editeur-texte');
+    els.editeurEtat = q('editeur-etat');
+    els.btnAppliquerTexte = q('btn-appliquer-texte');
+    els.btnRestaurerTexte = q('btn-restaurer-texte');
     els.ignorerPagesGarde = q('reglage-ignorer-pages-garde');
     els.btnReinitialiser = q('btn-reinitialiser');
     els.dropzone = q('dropzone');
@@ -634,6 +786,7 @@
     applySettingsToUI(loadSettings());
     wireSettingsEvents();
     wireFileEvents();
+    wireEditorEvents();
     els.btnTelecharger.addEventListener('click', handleDownload);
     els.btnImprimer.addEventListener('click', handlePrint);
 

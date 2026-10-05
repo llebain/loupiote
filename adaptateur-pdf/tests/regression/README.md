@@ -34,6 +34,15 @@ tests sont ignores, avec un message (`CORPUS_OBLIGATOIRE=1` en fait un echec).
 Tous les scripts pilotant Chrome acceptent `CHROME_PATH=/chemin/chrome` a la
 place du Chrome installe (`channel: 'chrome'`).
 
+## Tests du retour de test du 05/10/2026 (`edition.mjs`, `edition-navigateur.mjs`)
+
+Taille par défaut 20 pt, en-têtes/pieds/numéros masqués par défaut puis
+réaffichables (`04-entete-pied-repetes.pdf`, `08-numerotation.pdf`), mode
+Texte simplifié (`v3-matrices.pdf`, `v3-titre-et-colonnes.pdf`,
+`07-mascottes.pdf`), modèle de relecture du texte (`src/04b-text-edit.js` :
+suppression, correction, ajout, style des runs conservé, texte simple) sous
+Node ; panneau « Modifier le texte », cases et légende de page dans Chrome.
+
 ## Tests v0.3 (`v03.mjs`, `v03-navigateur.mjs`)
 
 `tests/fixtures_v03.py` fabrique une fixture par defaut du diagnostic v0.3

@@ -127,7 +127,8 @@
           // Calque de fond decoratif (bande enveloppante fusionnee dans cet
           // item, cf. Addendum 6 Z10bis -- jamais un item separe, pour ne
           // pas risquer d'atterrir sur une autre page que son contenu).
-          if (item.outerWrap) {
+          // Mode simplifie : aucun cadre ni fond de boite, le texte seul.
+          if (item.outerWrap && !settings.simplified) {
             const wrapColors = window.LayoutEngine.resolveContainerColors(item.outerWrap.fill, item.outerWrap.stroke, settings, theme);
             doc.setFillColor(wrapColors.fill[0], wrapColors.fill[1], wrapColors.fill[2]);
             doc.setDrawColor(wrapColors.stroke[0], wrapColors.stroke[1], wrapColors.stroke[2]);
@@ -136,10 +137,12 @@
             doc.roundedRect(item.x - p, item.y - p, item.width + 2 * p, item.height + 2 * p, 10, 10, 'FD');
           }
           const colors = window.LayoutEngine.resolveContainerColors(item.fill, item.stroke, settings, theme);
-          doc.setFillColor(colors.fill[0], colors.fill[1], colors.fill[2]);
-          doc.setDrawColor(colors.stroke[0], colors.stroke[1], colors.stroke[2]);
-          doc.setLineWidth(1.2);
-          doc.roundedRect(item.x, item.y, item.width, item.height, 8, 8, 'FD');
+          if (!settings.simplified) {
+            doc.setFillColor(colors.fill[0], colors.fill[1], colors.fill[2]);
+            doc.setDrawColor(colors.stroke[0], colors.stroke[1], colors.stroke[2]);
+            doc.setLineWidth(1.2);
+            doc.roundedRect(item.x, item.y, item.width, item.height, 8, 8, 'FD');
+          }
           renderLines(doc, item.lines, settings, theme, colors.fill);
           // ADDENDUM 6, Z12, C1 : images de la boite (cf. 03-layout-engine.js,
           // reflowBlocksInWidth) -- meme fonction de rendu que les images de

@@ -40,8 +40,8 @@ __CSS__
 
     <fieldset>
       <legend>Texte</legend>
-      <label for="reglage-taille">Taille du texte : <output id="valeur-taille">24</output> pt</label>
-      <input type="range" id="reglage-taille" min="20" max="48" step="1" value="24">
+      <label for="reglage-taille">Taille du texte : <output id="valeur-taille">20</output> pt</label>
+      <input type="range" id="reglage-taille" min="20" max="48" step="1" value="20">
       <p style="font-weight:normal;">20 pt minimum : hauteur de capitale mesurée à 5,4 mm, au-dessus du seuil de 0,5 cm.</p>
 
       <label for="reglage-couleur">Couleur du document</label>
@@ -73,6 +73,11 @@ __CSS__
 
     <fieldset>
       <legend>Affichage</legend>
+      <p class="case-a-cocher">
+        <input type="checkbox" id="reglage-simplifie">
+        <label for="reglage-simplifie">Texte simplifié : sans cadres, ni couleurs, ni images (le texte seul, titres et gras conservés)</label>
+      </p>
+
       <label for="reglage-contraste">Contraste</label>
       <select id="reglage-contraste">
         <option value="noir-blanc" selected>Noir sur blanc</option>
@@ -100,6 +105,11 @@ __CSS__
         <option value="non">Non, jamais découper</option>
       </select>
 
+      <p class="case-a-cocher">
+        <input type="checkbox" id="reglage-entetes-pieds">
+        <label for="reglage-entetes-pieds">Garder les en-têtes, pieds de page et numéros de page du document</label>
+      </p>
+
       <p style="margin-top:0.8em;">
         <input type="checkbox" id="reglage-ignorer-pages-garde" checked style="width:auto;min-width:24px;min-height:24px;vertical-align:middle;">
         <label for="reglage-ignorer-pages-garde" style="display:inline;font-weight:normal;">Ignorer les pages de garde et de copyright (détection automatique)</label>
@@ -113,11 +123,36 @@ __CSS__
     <div id="barre-action">
       <button type="button" id="btn-telecharger" disabled>Télécharger le PDF adapté</button>
       <button type="button" id="btn-imprimer" disabled>Imprimer</button>
+      <button type="button" id="btn-modifier-texte" class="secondary" disabled aria-expanded="false" aria-controls="editeur">Modifier le texte</button>
       <span id="compteur-pages" aria-live="polite"></span>
     </div>
     <div id="progression" role="status" aria-live="polite" data-active="false"></div>
     <div id="messages" aria-live="polite"></div>
-    <div id="apercu"></div>
+    <div id="espace-travail">
+      <section id="editeur" hidden aria-labelledby="editeur-titre">
+        <h2 id="editeur-titre">Modifier le texte</h2>
+        <p>Supprimez les phrases en trop, corrigez les fautes : la mise en page est refaite à partir de ce texte. Séparez les paragraphes par une ligne vide.</p>
+        <fieldset id="editeur-mode">
+          <legend>Après modification</legend>
+          <p class="case-a-cocher">
+            <input type="radio" name="editeur-mode" id="editeur-mode-blocs" value="blocs" checked>
+            <label for="editeur-mode-blocs">Garder la mise en forme (titres, gras, tableaux)</label>
+          </p>
+          <p class="case-a-cocher">
+            <input type="radio" name="editeur-mode" id="editeur-mode-brut" value="brut">
+            <label for="editeur-mode-brut">Texte simple seulement (plus de titres, de tableaux ni d'images)</label>
+          </p>
+        </fieldset>
+        <label for="editeur-texte">Texte du document</label>
+        <textarea id="editeur-texte" rows="14" spellcheck="true" lang="fr"></textarea>
+        <div class="editeur-actions">
+          <button type="button" id="btn-appliquer-texte">Appliquer les modifications</button>
+          <button type="button" id="btn-restaurer-texte" class="secondary">Revenir au texte d'origine</button>
+        </div>
+        <p id="editeur-etat" role="status" aria-live="polite"></p>
+      </section>
+      <div id="apercu"></div>
+    </div>
   </div>
 </main>
 
@@ -143,6 +178,9 @@ __JS_LAYOUT_ENGINE__
 </script>
 <script>
 __JS_PDF_EXPORT__
+</script>
+<script>
+__JS_TEXT_EDIT__
 </script>
 <script>
 __JS_MAIN__
