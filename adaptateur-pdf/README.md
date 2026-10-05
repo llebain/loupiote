@@ -16,8 +16,8 @@ personnel) pour un enfant malvoyant.
    internet requise**, aucune installation.
 2. Déposer un PDF dans la zone prévue, ou cliquer sur « Choisir un fichier ».
 3. Ajuster les réglages (taille — 20 pt par défaut —, interligne,
-   contraste, espacement, images, orientation, double page, texte
-   simplifié, en-têtes et numéros de page) dans le panneau latéral —
+   contraste, espacement, images, orientation, double page, mode d'affichage
+   standard / texte simplifié / texte seul, en-têtes et numéros de page) dans le panneau latéral —
    l'aperçu se met à jour immédiatement.
 4. Au besoin, cliquer sur « Modifier le texte » : le texte du document
    s'affiche à côté de l'aperçu, on y supprime une phrase en trop ou on
@@ -133,7 +133,8 @@ général ; le PDF téléchargé, lui, a bien ses pages paysage.
 | E8 | Pastille de numéro : rattachée à l'en-tête de collection (« Orthographe 7 »). |
 | E9 | Aucun italique. |
 | C1 | Contraste : toute couleur de texte est gardée si elle atteint 4,5:1 sur le fond réellement derrière elle (page, encadré, cellule), sinon assombrie (ou éclaircie) en gardant sa teinte. |
-| T1 | **Texte simplifié** (case à cocher, retour de test du 05/10/2026) : ni cadre, ni fond, ni bordure, ni rembourrage de boîte ; couleurs rendues en noir et blanc (E5 : un mot que la couleur distinguait passe en gras) ; images masquées (réglage Images toujours modifiable) ; titres, gras et tableaux conservés. |
+| T1 | **Mode d'affichage** (liste « Standard / Texte simplifié / Texte seul », retour de test du 05/10/2026). **Texte simplifié** : ni cadre, ni fond, ni bordure, ni rembourrage de boîte ; couleurs rendues en noir et blanc (E5 : un mot que la couleur distinguait passe en gras) ; images masquées (réglage Images toujours modifiable) ; titres, gras et tableaux conservés. |
+| T4 | **Texte seul** : le document est reconstruit en paragraphes simples (tout le texte affiché, dans l'ordre d'extraction), PDF Luciole en vrai texte ; ni titre, gras, couleur, tableau, cadre ni image. Taille, interligne, contraste restent réglables ; images masquées. Les corrections du panneau « Modifier le texte » s'y appliquent. |
 | T2 | **En-têtes, pieds de page et numéros de page** (« Page 1 sur 3 », folio, titre courant répété) : détectés, gardés dans le modèle, masqués par défaut ; case « Garder les en-têtes… » pour les réafficher. La légende « Page n / N » de l'aperçu est hors de la page et n'est jamais imprimée. |
 | T3 | **Modifier le texte** : panneau à côté de l'aperçu, un paragraphe par bloc séparé d'une ligne vide. Mode « Garder la mise en forme » : chaque correction est reportée sur son bloc (style, place, conteneur conservés ; un paragraphe ajouté prend la place du précédent) ; mode « Texte simple » : le document est reconstruit à partir du seul texte, sans titre ni tableau ni image. Les saisies non appliquées survivent à un changement de réglage ; « Revenir au texte d'origine » restaure tout. |
 | Z2 (mis à jour) | Taille par défaut **20 pt** (plancher inchangé, curseur 20-48 pt). |

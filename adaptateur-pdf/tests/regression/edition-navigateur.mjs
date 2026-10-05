@@ -54,7 +54,9 @@ async function main() {
     const { ctx, page, errors, requests } = await ouvrir(browser);
     check('ui/taille-20', await page.inputValue('#reglage-taille') === '20', `curseur = ${await page.inputValue('#reglage-taille')}`);
     check('ui/taille-affichee-20', (await page.textContent('#valeur-taille')) === '20', 'texte du curseur');
-    check('ui/simplifie-decoche', !(await page.isChecked('#reglage-simplifie')), 'simplifie coche par defaut');
+    check('ui/mode-standard', (await page.inputValue('#reglage-mode')) === 'standard', `mode = ${await page.inputValue('#reglage-mode')}`);
+    const modes = await page.evaluate(() => [...document.querySelectorAll('#reglage-mode option')].map((o) => o.value).join(','));
+    check('ui/trois-modes', modes === 'standard,simplifie,texte', modes);
     check('ui/entetes-decoche', !(await page.isChecked('#reglage-entetes-pieds')), 'en-tetes coches par defaut');
     check('ui/editeur-bouton-desactive', await page.isDisabled('#btn-modifier-texte'), 'bouton actif sans document');
     check('ui/editeur-ferme', await page.isHidden('#editeur'), 'editeur visible sans document');
@@ -91,7 +93,7 @@ async function main() {
     const pagesAvant = await nb(page, '.page-apercu');
     check('simplifie/cadres-presents-avant', cadres > 0, `${cadres} cadre(s)`);
     const texteAvant = (await textePages(page)).replace(/\s+/g, ' ');
-    await page.check('#reglage-simplifie');
+    await page.selectOption('#reglage-mode', 'simplifie');
     await attendreApercu(page);
     check('simplifie/plus-de-cadre', (await nb(page, '.bloc-boite')) === 0, `${await nb(page, '.bloc-boite')} cadre(s) restant(s)`);
     check('simplifie/images-masquees', (await page.inputValue('#reglage-images')) === 'masquer', `images = ${await page.inputValue('#reglage-images')}`);
@@ -104,11 +106,54 @@ async function main() {
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#btn-telecharger')]);
     const doc = await pdfjsLib.getDocument({ data: new Uint8Array(fs.readFileSync(await dl.path())), disableFontFace: true, verbosity: 0 }).promise;
     check('simplifie/export-pages', doc.numPages === await nb(page, '.page-apercu'), `export ${doc.numPages} page(s)`);
-    await page.uncheck('#reglage-simplifie');
+    await page.selectOption('#reglage-mode', 'standard');
     await attendreApercu(page);
     check('simplifie/retour', (await nb(page, '.bloc-boite')) === cadres && (await page.inputValue('#reglage-images')) === 'conserver', 'le mode normal ne revient pas');
     await ctx.close();
     check('simplifie/aucune-erreur-js', errors.length === 0, errors.join(' | '));
+  }
+
+  // --- Texte seul ---------------------------------------------------------------
+  console.log('\n=== texte seul ===');
+  {
+    const { ctx, page, errors } = await ouvrir(browser, 'v3-titre-et-colonnes.pdf');
+    // Mots du mode standard, hors titres « Tableau (n/N) » generes par la mise en page.
+    const mots = async () => (await textePages(page)).replace(/\s+/g, ' ').split(' ').filter((w) => w && !/^Tableau$|^\(\d+\/\d+\)$/.test(w));
+    const motsAvant = await mots();
+    await page.selectOption('#reglage-mode', 'texte');
+    await attendreApercu(page);
+    check('texte-seul/aucun-element-de-mise-en-forme', (await nb(page, '.bloc-boite, .cellule-tableau, img.image-apercu')) === 0, 'cadre, tableau ou image present');
+    const gras = await page.evaluate(() => [...document.querySelectorAll('.page-apercu .ligne, .page-apercu span')].filter((e) => e.style.fontWeight === 'bold' || e.style.textDecoration).length);
+    check('texte-seul/ni-gras-ni-souligne', gras === 0, `${gras} element(s) en gras ou souligne`);
+    const couleurs = await page.evaluate(() => [...document.querySelectorAll('.page-apercu span')].filter((s) => getComputedStyle(s).color !== 'rgb(0, 0, 0)').length);
+    check('texte-seul/texte-noir', couleurs === 0, `${couleurs} span(s) non noir(s)`);
+    const tailles = await page.evaluate(() => new Set([...document.querySelectorAll('.page-apercu .ligne')].map((l) => l.style.fontSize)).size);
+    check('texte-seul/une-seule-taille', tailles === 1, `${tailles} tailles differentes`);
+    // Tout le texte du mode standard est la (le texte seul garde meme des mots
+    // que la mise en page standard retire, ex. colonne des pronoms, E7).
+    const apres = new Map();
+    for (const w of await mots()) apres.set(w, (apres.get(w) || 0) + 1);
+    const perdus = [];
+    for (const w of motsAvant) { if (!apres.get(w)) perdus.push(w); else apres.set(w, apres.get(w) - 1); }
+    check('texte-seul/tout-le-texte', perdus.length === 0, `mots perdus : ${perdus.slice(0, 10).join(' ')}`);
+    check('texte-seul/images-masquees', (await page.inputValue('#reglage-images')) === 'masquer', `images = ${await page.inputValue('#reglage-images')}`);
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#btn-telecharger')]);
+    const doc = await pdfjsLib.getDocument({ data: new Uint8Array(fs.readFileSync(await dl.path())), disableFontFace: true, verbosity: 0 }).promise;
+    check('texte-seul/export-pages', doc.numPages === await nb(page, '.page-apercu'), `export ${doc.numPages} page(s)`);
+    const tc = await (await doc.getPage(1)).getTextContent();
+    check('texte-seul/export-vrai-texte', tc.items.some((i) => i.str.trim()), 'aucun texte dans le PDF');
+    // Le mode survit a un changement de reglage et a une correction de texte.
+    await page.click('#btn-modifier-texte');
+    const t = await page.inputValue('#editeur-texte');
+    await page.fill('#editeur-texte', t.replace(/^(\S+)/, 'MODIFIE'));
+    await page.click('#btn-appliquer-texte');
+    await attendreApercu(page);
+    check('texte-seul/edition', /MODIFIE/.test(await textePages(page)) && (await nb(page, '.bloc-boite, .cellule-tableau')) === 0, 'la correction n\'apparait pas en texte seul');
+    await page.selectOption('#reglage-mode', 'standard');
+    await attendreApercu(page);
+    check('texte-seul/retour-standard', (await nb(page, '.cellule-tableau')) > 0 && /MODIFIE/.test(await textePages(page)), 'le retour au standard perd la mise en page ou la correction');
+    await ctx.close();
+    check('texte-seul/aucune-erreur-js', errors.length === 0, errors.join(' | '));
   }
 
   // --- Relecture du texte -------------------------------------------------------

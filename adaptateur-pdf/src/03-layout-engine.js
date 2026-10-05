@@ -24,6 +24,8 @@
     skipFrontMatter: true, // ADDENDUM 4, section T.2 : ignore pages de garde/copyright par defaut
     simplified: false,      // mode « Texte simplifie » : ni cadre, ni fond, ni couleur ni
                             // rembourrage de boite ; titres, gras et tableaux conserves
+    textOnly: false,        // mode « Texte seul » : aucun element de mise en page (05-main.js
+                            // reconstruit le document en paragraphes simples, cf. TextEdit.textOnlyDocument)
     showHeaderFooter: false, // en-tetes, pieds de page et numeros de page : masques par defaut
     colorMode: 'couleur',   // ADDENDUM 6, section Z5 : 'couleur' | 'nb' -- decision d'affichage,
                             // appliquee aux couleurs deja extraites (formes + texte), jamais a
@@ -50,6 +52,7 @@
     if (!CONTRAST_THEMES[out.contrast]) out.contrast = 'noir-blanc';
     if (out.colorMode !== 'nb') out.colorMode = 'couleur';
     out.simplified = out.simplified === true;
+    out.textOnly = out.textOnly === true;
     out.showHeaderFooter = out.showHeaderFooter === true;
     return out;
   }
@@ -60,6 +63,7 @@
   // l'utilisateur retrouve en quittant le mode. Idempotent.
   function effectiveSettings(s) {
     const out = clampSettings(s);
+    if (out.textOnly) out.simplified = true; // le texte seul est a fortiori sans cadre
     if (out.simplified) out.colorMode = 'nb';
     return out;
   }
