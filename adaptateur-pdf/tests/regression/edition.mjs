@@ -1,4 +1,4 @@
-// Retour de test du 05/10/2026 (reunion avec Estelle) -- tests cibles :
+// Retour de test du 05/10/2026 (reunion de test de l'outil) -- tests cibles :
 //  - taille par defaut 20 pt ;
 //  - en-tetes, pieds de page et numeros de page : masques par defaut,
 //    reaffichables, jamais perdus du modele ;
