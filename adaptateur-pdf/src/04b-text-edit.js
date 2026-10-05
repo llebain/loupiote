@@ -278,6 +278,13 @@
     return { blocks, extraction };
   }
 
+  // Mode « Texte seul » : tout le texte affiche, paragraphe par paragraphe,
+  // sans titre, gras, couleur, tableau, cadre ni image.
+  function textOnlyDocument(blocks, settings) {
+    const paragraphs = visibleBlocks(blocks, settings).map(blockText);
+    return plainDocument(joinParagraphs(paragraphs));
+  }
+
   window.TextEdit = {
     blockText,
     isEditable,
@@ -288,5 +295,6 @@
     applyTextToRuns,
     applyEdit,
     plainDocument,
+    textOnlyDocument,
   };
 })();

@@ -148,7 +148,8 @@
       orientation: els.orientation.value,
       skipFrontMatter: els.ignorerPagesGarde.checked,
       colorMode: els.couleur.value,
-      simplified: els.simplifie.checked,
+      simplified: els.mode.value === 'simplifie',
+      textOnly: els.mode.value === 'texte',
       showHeaderFooter: els.entetesPieds.checked,
     });
   }
@@ -164,8 +165,18 @@
     els.ignorerPagesGarde.checked = s.skipFrontMatter !== false;
     els.orientation.value = s.orientation;
     els.couleur.value = s.colorMode;
-    els.simplifie.checked = s.simplified === true;
+    els.mode.value = s.textOnly ? 'texte' : (s.simplified ? 'simplifie' : 'standard');
+    updateModeHelp();
     els.entetesPieds.checked = s.showHeaderFooter === true;
+  }
+
+  const AIDE_MODE = {
+    standard: 'Mise en page d\u2019origine : cadres, couleurs, tableaux et images.',
+    simplifie: 'Sans cadres, couleurs ni images ; titres, gras et tableaux conserv\u00e9s.',
+    texte: 'Que le texte, en paragraphes : ni titre, gras, tableau, cadre ni image.',
+  };
+  function updateModeHelp() {
+    els.aideMode.textContent = AIDE_MODE[els.mode.value] || '';
   }
 
   function setProgress(text, active) {
@@ -383,9 +394,12 @@
     // d'un reglage.
     if (editorOpen && editorIsDirty()) commitEditor(settings);
     let blocks, extraction;
-    if (plainText !== null) {
-      // Mode « texte simple » : le document est reconstruit depuis le texte.
-      const plain = window.TextEdit.plainDocument(plainText);
+    if (plainText !== null || settings.textOnly) {
+      // Mode « texte simple » (panneau d'edition) ou mode d'affichage « Texte
+      // seul » : le document est reconstruit en paragraphes simples.
+      const plain = plainText !== null
+        ? window.TextEdit.plainDocument(plainText)
+        : window.TextEdit.textOnlyDocument(workingBlocks, settings);
       blocks = plain.blocks;
       extraction = plain.extraction;
     } else {
@@ -700,15 +714,15 @@
   }
 
   function wireSettingsEvents() {
-    ['taille', 'interligne', 'contraste', 'espacementCar', 'espacementMot', 'images', 'orientation', 'doublePage', 'ignorerPagesGarde', 'couleur', 'simplifie', 'entetesPieds'].forEach((key) => {
+    ['taille', 'interligne', 'contraste', 'espacementCar', 'espacementMot', 'images', 'orientation', 'doublePage', 'ignorerPagesGarde', 'couleur', 'mode', 'entetesPieds'].forEach((key) => {
       els[key].addEventListener('input', () => {
         if (key === 'taille') els.valeurTaille.textContent = els.taille.value;
-        // Texte simplifie : le texte seul, donc sans images ; reste reglable ensuite.
-        if (key === 'simplifie') els.images.value = els.simplifie.checked ? 'masquer' : 'conserver';
+        // Texte simplifie / texte seul : sans images ; reste reglable ensuite.
+        if (key === 'mode') { els.images.value = els.mode.value === 'standard' ? 'conserver' : 'masquer'; updateModeHelp(); }
         if (masterBlocks) recomputeLayoutAndRender();
       });
       els[key].addEventListener('change', () => {
-        if (key === 'simplifie') els.images.value = els.simplifie.checked ? 'masquer' : 'conserver';
+        if (key === 'mode') els.images.value = els.mode.value === 'standard' ? 'conserver' : 'masquer';
         if (masterBlocks) recomputeLayoutAndRender();
       });
     });
@@ -760,7 +774,8 @@
     els.orientation = q('reglage-orientation');
     els.couleur = q('reglage-couleur');
     els.doublePage = q('reglage-double-page');
-    els.simplifie = q('reglage-simplifie');
+    els.mode = q('reglage-mode');
+    els.aideMode = q('aide-mode');
     els.entetesPieds = q('reglage-entetes-pieds');
     els.btnModifierTexte = q('btn-modifier-texte');
     els.espaceTravail = q('espace-travail');

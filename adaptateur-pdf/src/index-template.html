@@ -73,10 +73,13 @@ __CSS__
 
     <fieldset>
       <legend>Affichage</legend>
-      <p class="case-a-cocher">
-        <input type="checkbox" id="reglage-simplifie">
-        <label for="reglage-simplifie">Texte simplifié : sans cadres, ni couleurs, ni images (le texte seul, titres et gras conservés)</label>
-      </p>
+      <label for="reglage-mode">Mode d'affichage</label>
+      <select id="reglage-mode">
+        <option value="standard" selected>Standard</option>
+        <option value="simplifie">Texte simplifié</option>
+        <option value="texte">Texte seul</option>
+      </select>
+      <p id="aide-mode" style="font-weight:normal;margin:0.4em 0 0.8em;"></p>
 
       <label for="reglage-contraste">Contraste</label>
       <select id="reglage-contraste">

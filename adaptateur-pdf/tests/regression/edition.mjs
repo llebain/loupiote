@@ -48,6 +48,8 @@ async function run() {
   check('defaut/simplifie-off', LE.clampSettings({}).simplified === false, 'simplified devrait valoir false');
   check('defaut/entetes-masques', LE.clampSettings({}).showHeaderFooter === false, 'showHeaderFooter devrait valoir false');
   check('simplifie/noir-et-blanc-effectif', LE.effectiveSettings({ simplified: true, colorMode: 'couleur' }).colorMode === 'nb', 'le mode simplifie doit rendre en N&B');
+  check('defaut/texte-seul-off', LE.clampSettings({}).textOnly === false, 'textOnly devrait valoir false');
+  check('texte-seul/implique-simplifie', LE.effectiveSettings({ textOnly: true }).simplified === true, 'le texte seul doit etre sans cadre');
   check('simplifie/reglage-couleur-intact', LE.clampSettings({ simplified: true, colorMode: 'couleur' }).colorMode === 'couleur', 'clampSettings ne doit pas ecraser colorMode');
 
   // --- En-tetes / pieds / numeros --------------------------------------------
@@ -208,6 +210,25 @@ async function run() {
     check('brut/export', ex.output('arraybuffer').byteLength > 1000, 'export vide');
     const vide = TE.plainDocument('   \n\n  ');
     check('brut/vide', vide.blocks.length === 0, 'un texte vide doit donner un document vide');
+  }
+
+  // --- Mode « Texte seul » -------------------------------------------------------
+  console.log('\n=== texte seul (document) ===');
+  for (const n of ['v3-titre-et-colonnes.pdf', 'v3-matrices.pdf', '07-mascottes.pdf', '01-hierarchie-styles-listes.pdf']) {
+    const S = LE.clampSettings({ textOnly: true });
+    const r = await runFullPipeline(ctx, FIX(n), { fontSize: 20 });
+    const doc = TE.textOnlyDocument(r.extraction.blocks, S);
+    const lay = relayout(doc.extraction, doc.blocks, { fontSize: 20, textOnly: true });
+    check(`${n}/texte-seul-que-du-flux`, lay.pages.every((pg) => pg.items.every((it) => it.kind === 'flow')), 'element autre que du texte courant');
+    const lignes = allLines(ctx, lay);
+    check(`${n}/texte-seul-ni-gras-ni-titre`, lignes.every((l) => !l.isHeading && l.segments.every((s) => s.style !== 'bold' && !s.underline)), 'gras ou titre en texte seul');
+    check(`${n}/texte-seul-une-taille`, new Set(lignes.map((l) => l.sizePt)).size === 1, 'plusieurs tailles de police');
+    const mots = (t) => t.replace(/\s+/g, ' ').split(' ').filter(Boolean).sort().join(' ');
+    const attendu = TE.visibleBlocks(r.extraction.blocks, S).map(TE.blockText).join(' ');
+    check(`${n}/texte-seul-tout-le-texte`, mots(layoutText(ctx, lay)) === mots(attendu), 'des mots perdus ou ajoutes');
+    const ex = ctx.PdfExport.createExportDoc(ctx.jsPDF, lay.pages[0].pageDims);
+    ctx.PdfExport.renderLayoutToPdf(ex, lay, 'texte.pdf');
+    check(`${n}/texte-seul-export`, ex.output('arraybuffer').byteLength > 1000, 'export vide');
   }
 
   origLog(`\n${'='.repeat(60)}`);
