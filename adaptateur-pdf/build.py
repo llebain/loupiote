@@ -34,6 +34,7 @@ def main():
     js_ocr_pipeline = read_text(SRC / "02-ocr-pipeline.js")
     js_layout_engine = read_text(SRC / "03-layout-engine.js")
     js_pdf_export = read_text(SRC / "04-pdf-export.js")
+    js_text_edit = read_text(SRC / "04b-text-edit.js")
     js_main = read_text(SRC / "05-main.js")
     template = read_text(SRC / "index-template.html")
 
@@ -66,13 +67,15 @@ def main():
     html = html.replace("__JS_OCR_PIPELINE__", js_ocr_pipeline)
     html = html.replace("__JS_LAYOUT_ENGINE__", js_layout_engine)
     html = html.replace("__JS_PDF_EXPORT__", js_pdf_export)
+    html = html.replace("__JS_TEXT_EDIT__", js_text_edit)
     html = html.replace("__JS_MAIN__", js_main)
 
     # Detecte un marqueur de substitution du gabarit oublie (le gabarit
     # utilise exclusivement des noms en __XXX__ ; on ignore les identifiants
     # internes comme __DEBUG_BLOCKS__ qui font partie du code applicatif).
     TEMPLATE_MARKERS = {"__CSS__", "__ASSETS_JSON__", "__JS_LIB_LOADER__", "__JS_EXTRACT_NATIVE__",
-                         "__JS_OCR_PIPELINE__", "__JS_LAYOUT_ENGINE__", "__JS_PDF_EXPORT__", "__JS_MAIN__"}
+                         "__JS_OCR_PIPELINE__", "__JS_LAYOUT_ENGINE__", "__JS_PDF_EXPORT__",
+                         "__JS_TEXT_EDIT__", "__JS_MAIN__"}
     leftover = [m for m in TEMPLATE_MARKERS if m in html]
     if leftover:
         print("ATTENTION : marqueurs de gabarit non remplaces :", leftover)

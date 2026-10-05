@@ -793,6 +793,9 @@
       const key = normalizeForRepetition(l.text) + '|' + Math.round(l.y / 10);
       if (repeated.has(key)) return true;
       if (/^\d{1,4}$/.test(l.text.trim())) return true; // folio isole purement numerique
+      // « Page 1 », « Page 1 sur 3 », « 1 / 3 » : numerotation de page, meme
+      // sur un document trop court pour que la repetition la revele.
+      if (/^(page\s*)?\d{1,4}\s*(\/|sur|of)\s*\d{1,4}$|^page\s*\d{1,4}$/i.test(l.text.trim())) return true;
       return false;
     };
   }
@@ -1617,6 +1620,11 @@
     const perPageQuality = [];
 
     for (let p = 0; p < pagesLines.length; p++) {
+      // En-tetes, pieds de page et numeros de page : ecartes du flux comme
+      // avant, mais gardes (`headerFooter`) pour pouvoir etre reaffiches
+      // (case « Garder les en-tetes... ») ou supprimes un par un a la
+      // relecture -- jamais perdus (Z3).
+      const headerFooterLines = pagesLines[p].filter((l) => isHeaderFooter(l));
       let lines = pagesLines[p].filter((l) => !isHeaderFooter(l));
       const pageText = lines.map((l) => l.text).join(' ');
       totalChars += pageText.length;
@@ -1943,6 +1951,12 @@
           bbox: { x0: l.x0, x1: l.x1, y0: l.y - l.size * 0.3, y1: l.y + l.size },
         });
       }
+      for (const l of headerFooterLines) {
+        blocks.push({
+          type: 'p', runs: l.runs, srcPage: p + 1, headerFooter: true, size: l.size,
+          bbox: { x0: l.x0, x1: l.x1, y0: l.y - l.size * 0.3, y1: l.y + l.size },
+        });
+      }
       // v0.3, lot 2 (E1/S2) : exemplaires en double, marques (jamais
       // supprimes) -- bloc, et plus bas images, dont le centre tombe dans
       // une region en double.
@@ -1963,7 +1977,7 @@
         // exclu : ce texte n'est affiche NULLE PART ailleurs (masque par
         // defaut, Z3/Z4.4quater), le laisser dans l'image ne duplique rien.
         const keptTextBboxes = blocks
-          .filter((b) => b.srcPage === p + 1 && b.bbox && !b.secondary && b.type !== 'image')
+          .filter((b) => b.srcPage === p + 1 && b.bbox && !b.secondary && !b.headerFooter && b.type !== 'image')
           .map((b) => b.bbox);
         const imageBlocks = await extractImageBlocksForPage(pdfDoc, p + 1, pageMeta[p].page, pageMeta[p].opList, keptTextBboxes);
         if (pageRegions) {
@@ -2018,6 +2032,7 @@
     const perPageText = new Map();
     for (const b of blocks) {
       if (!b.srcPage || !b.runs) continue;
+      if (b.headerFooter) continue; // jamais pris en compte avant qu'ils ne soient gardes dans le modele
       const t = b.runs.map((r) => r.text).join(' ');
       perPageText.set(b.srcPage, (perPageText.get(b.srcPage) || '') + ' ' + t);
     }

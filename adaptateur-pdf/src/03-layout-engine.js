@@ -13,7 +13,8 @@
   const MARGIN_MM = 20;
 
   const DEFAULTS = Object.freeze({
-    fontSize: 24,       // pt, preset conforme par defaut (plancher reel : 20, cf. clampSettings)
+    fontSize: 20,       // pt, plancher reel (cf. clampSettings) ; test utilisatrice du 05/10/2026 : « la taille 20, pas plus grand,
+                        // ça sert à rien » -- que ça rentre un maximum dans une feuille
     lineHeight: 1.5,    // plancher absolu
     contrast: 'noir-blanc',
     letterSpacing: 'normal', // normal | 0.05em | 0.1em
@@ -21,6 +22,9 @@
     showImages: true,
     orientation: 'portrait',
     skipFrontMatter: true, // ADDENDUM 4, section T.2 : ignore pages de garde/copyright par defaut
+    simplified: false,      // mode « Texte simplifie » : ni cadre, ni fond, ni couleur ni
+                            // rembourrage de boite ; titres, gras et tableaux conserves
+    showHeaderFooter: false, // en-tetes, pieds de page et numeros de page : masques par defaut
     colorMode: 'couleur',   // ADDENDUM 6, section Z5 : 'couleur' | 'nb' -- decision d'affichage,
                             // appliquee aux couleurs deja extraites (formes + texte), jamais a
                             // l'extraction elle-meme
@@ -40,12 +44,30 @@
     // de capitale, au-dessus du seuil de 0,5 cm (~8% de marge). Ne jamais
     // descendre sous 20, ni remonter le plancher au-dela sans reverifier la
     // mesure.
-    out.fontSize = Math.max(20, Number(out.fontSize) || 24);
+    out.fontSize = Math.max(20, Number(out.fontSize) || DEFAULTS.fontSize);
     if (![1.5, 1.75, 2].includes(Number(out.lineHeight))) out.lineHeight = 1.5;
     out.lineHeight = Math.max(1.5, Number(out.lineHeight));
     if (!CONTRAST_THEMES[out.contrast]) out.contrast = 'noir-blanc';
     if (out.colorMode !== 'nb') out.colorMode = 'couleur';
+    out.simplified = out.simplified === true;
+    out.showHeaderFooter = out.showHeaderFooter === true;
     return out;
+  }
+
+  // Reglages EFFECTIFS pour la mise en page : le mode simplifie rend le
+  // document en noir et blanc (un mot que la couleur distinguait passe en
+  // gras, cf. runsForDisplay) sans toucher au reglage `colorMode` que
+  // l'utilisateur retrouve en quittant le mode. Idempotent.
+  function effectiveSettings(s) {
+    const out = clampSettings(s);
+    if (out.simplified) out.colorMode = 'nb';
+    return out;
+  }
+
+  // Rembourrage interieur d'une boite : nul en mode simplifie (pas de
+  // cadre, le texte retrouve la marge de page).
+  function boxPaddingFor(settings) {
+    return settings.simplified ? 0 : 0.5 * settings.fontSize;
   }
 
   function pageDimsPt(orientation) {
@@ -731,12 +753,15 @@
   // (pas encore de pagination multi-page -- cf. PLAN Z4, a traiter une fois
   // le rendu de base valide visuellement).
   function computeBlockLayout(pageBlocks, pageShapesForPage, pageSizeForPage, settings, measurer) {
-    settings = clampSettings(settings);
+    settings = effectiveSettings(settings);
     // ADDENDUM 6, Z3/Z4.4quater : contenu secondaire (mention d'editeur,
     // copyright en marge) masque par defaut -- decision d'affichage, pas
     // d'extraction (le bloc existe toujours dans pageBlocks, seulement
     // ecarte ici). Pas encore de reglage pour le reafficher (prevu au plan).
-    pageBlocks = pageBlocks.filter((b) => !b.secondary && !b.duplicate);
+    // En-tetes, pieds de page et numeros de page (`headerFooter`) : meme
+    // principe, mais reaffichables (case « Garder les en-tetes... »).
+    pageBlocks = pageBlocks.filter((b) => !b.secondary && !b.duplicate &&
+      (settings.showHeaderFooter || !b.headerFooter));
     const pageHeightSrc = pageSizeForPage.height;
 
     // ADDENDUM 6, Z4.4sexies -- correctif du 20/09/2026 (remonte par Loic :
@@ -811,7 +836,7 @@
     boxContents.forEach(reclassifyHeadingsInContainer);
     for (const cell of tableCells.flat(2)) reclassifyHeadingsInContainer(cell.blocks);
 
-    const boxPadding = 0.5 * settings.fontSize;
+    const boxPadding = boxPaddingFor(settings);
     const cellPadding = 0.35 * settings.fontSize;
     // ADDENDUM 6, Z12, C1 : plafond de hauteur d'une image DANS une boite/
     // cellule -- 60% de la hauteur utile d'une page pleine, marge large
@@ -874,7 +899,9 @@
       const boxX = marginForBoxes;
       const innerWidth = Math.max(40, outWidth - 2 * boxPadding);
       const { lines, images, height } = reflowBlocksInWidth(boxContents[bi], innerWidth, settings, measurer, boxPadding, maxImageHeight);
-      const outHeight = Math.max(rect.height, height + 2 * boxPadding);
+      // Mode simplifie : pas de cadre a remplir, la boite n'est pas
+      // etiree jusqu'a la hauteur de sa source (place gagnee sur la feuille).
+      const outHeight = settings.simplified ? height + 2 * boxPadding : Math.max(rect.height, height + 2 * boxPadding);
 
       // Boite qui ENVELOPPE celle-ci (bande de fond decorative) : fusionnee
       // comme calque de fond supplementaire de CE MEME item, jamais comme
@@ -1658,7 +1685,7 @@
   // ATOMIQUES : chacune part entiere du cote de la frontiere ou elle se
   // trouve, jamais coupee en deux.
   function splitBoxItem(item, remaining, settings) {
-    const boxPad = 0.5 * settings.fontSize; // meme formule qu'a la construction de la boite (computeBlockLayout)
+    const boxPad = boxPaddingFor(settings); // meme formule qu'a la construction de la boite (computeBlockLayout)
     const budget = remaining - boxPad; // reserve le rembourrage bas du cadre
     const imgs = item.images || [];
     // ADDENDUM 6, Z12, lot 3 (point 3, F2, collateral decouvert en
@@ -1903,7 +1930,7 @@
   // (elle grandit selon son propre contenu, cf. Addendum 6 Z1) : pas de
   // pageDims unique partagee.
   function computeBlockLayoutForDocument(extraction, blocks, settings, measurer) {
-    settings = clampSettings(settings);
+    settings = effectiveSettings(settings);
     const pageCount = extraction.pageSizes.length;
     const dims = pageDimsPt(settings.orientation);
     const pages = [];
@@ -1959,6 +1986,7 @@
     DEFAULTS,
     CONTRAST_THEMES,
     clampSettings,
+    effectiveSettings,
     pageDimsPt,
     makeMeasurer,
     computeLayout,

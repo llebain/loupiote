@@ -107,6 +107,25 @@ def fixture_4_entete_pied():
     pdf.output(str(FIXDIR / "04-entete-pied-repetes.pdf"))
 
 
+def fixture_8_numerotation():
+    """Deux pages seulement (trop court pour que la repetition revele le pied
+    de page) : numerotation « Page 1 sur 2 » en bas de chaque page."""
+    pdf = FPDF(format='A4', unit='mm')
+    pdf.set_auto_page_break(False)
+    for i in range(1, 3):
+        pdf.add_page()
+        pdf.set_xy(15, 25)
+        pdf.set_font('Helvetica', 'B', 14)
+        pdf.multi_cell(0, 8, f"Chapitre {i}")
+        pdf.set_x(15)
+        pdf.set_font('Helvetica', '', 12)
+        pdf.multi_cell(0, 7, PARA1)
+        pdf.set_xy(15, 285)
+        pdf.set_font('Helvetica', '', 9)
+        pdf.cell(0, 5, f"Page {i} sur 2", align='C')
+    pdf.output(str(FIXDIR / "08-numerotation.pdf"))
+
+
 def fixture_6_page_dense():
     """Une seule page tres dense (verifie la pagination en sortie)."""
     pdf = FPDF(format='A4', unit='mm')
@@ -243,6 +262,7 @@ if __name__ == "__main__":
     fixture_5_avec_images()
     fixture_6_page_dense()
     fixture_7_mascottes()
+    fixture_8_numerotation()
     fixtures_erreur()
     # Fixtures du plan v0.3 : une par defaut du diagnostic (PDF brut, sans
     # dependance, cf. fixtures_v03.py).
