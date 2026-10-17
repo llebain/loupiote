@@ -12,6 +12,14 @@
  *    sans cadre, tableau ni image (mise en forme perdue).
  * Aucun bloc n'est jamais modifie sur place : chaque fonction rend de
  * nouveaux objets, `masterBlocks` (05-main.js) reste l'original.
+ *
+ * Edition « traitement de texte » (retour de test d'Estelle) : en plus du
+ * texte, l'editeur riche (05-main.js) porte la mise en forme de chaque
+ * paragraphe — gras, souligne, retours a la ligne, type (titre, liste),
+ * alignement / justification, interligne, espaces, retrait. Elle est
+ * rapportee ici sur le modele (`bloc.fmt`, `run.bold`, `run.underline`,
+ * U+2028 = retour a la ligne force) ; le moteur de mise en page la lit
+ * (03-layout-engine.js). Pas d'italique (decision E9).
  * ==========================================================================*/
 
 (function () {
@@ -278,7 +286,195 @@
     return { blocks, extraction };
   }
 
+  // --- Edition riche : paragraphes { type, fmt, runs } ------------------------
+
+  const BREAK = '\u2028'; // retour a la ligne force (= LayoutEngine.BREAK_CHAR)
+  const TYPES = ['p', 'h1', 'h2', 'h3', 'li'];
+
+  // Mise en forme reduite a ce qui differe des valeurs par defaut.
+  function cleanFmt(f) {
+    f = f || {};
+    const out = {};
+    if (['center', 'right', 'justify'].includes(f.align)) out.align = f.align;
+    const lh = Number(f.lineHeight);
+    if (isFinite(lh) && lh > 0) out.lineHeight = Math.max(1.5, lh);
+    const before = Number(f.before), after = Number(f.after), indent = Number(f.indent);
+    if (isFinite(before) && before > 0) out.before = before;
+    if (isFinite(after) && after > 0) out.after = after;
+    if (isFinite(indent) && indent > 0) out.indent = indent;
+    return out;
+  }
+
+  // Caracteres d'une suite de runs : blancs normalises (une espace, pas de
+  // doublon, pas de blanc en tete ni en fin ni autour d'un retour force),
+  // BREAK conserve. `of` rend l'objet du run d'origine de chaque caractere.
+  function styledChars(runs, withRun) {
+    const chars = [];
+    (runs || []).forEach((r, ri) => {
+      for (const c0 of (r.text || '')) {
+        const c = c0 === BREAK ? BREAK : (/\s/.test(c0) ? ' ' : c0);
+        const prev = chars[chars.length - 1];
+        if (c === ' ' && (!prev || prev.c === ' ' || prev.c === BREAK)) continue;
+        if (c === BREAK && prev && prev.c === ' ') chars.pop();
+        chars.push({ c, bold: !!r.bold, underline: !!r.underline, ri: withRun ? ri : -1 });
+      }
+    });
+    while (chars.length && (chars[chars.length - 1].c === ' ' || chars[chars.length - 1].c === BREAK)) chars.pop();
+    while (chars.length && (chars[0].c === ' ' || chars[0].c === BREAK)) chars.shift();
+    return chars;
+  }
+
+  // Runs {text, bold, underline} fusionnes.
+  function mergeChars(chars) {
+    const out = [];
+    for (const ch of chars) {
+      const last = out[out.length - 1];
+      if (last && last.bold === ch.bold && last.underline === ch.underline) last.text += ch.c;
+      else out.push({ text: ch.c, bold: ch.bold, underline: ch.underline });
+    }
+    return out;
+  }
+
+  // Paragraphe d'edition d'un bloc affiche.
+  function toRichParagraph(b) {
+    return {
+      type: TYPES.includes(b.type) ? b.type : 'p',
+      fmt: cleanFmt(b.fmt),
+      runs: mergeChars(styledChars(b.runs, false)),
+    };
+  }
+  function toRichParagraphs(blocks, settings) {
+    return visibleBlocks(blocks, settings).map(toRichParagraph);
+  }
+
+  // Texte d'un paragraphe d'edition, normalise comme blockText.
+  function richText(p) {
+    return (p.runs || []).map((r) => r.text || '').join('').replace(/\s+/g, ' ').trim();
+  }
+
+  // Paragraphes d'edition « nettoyes » : type valide, mise en forme reduite,
+  // runs normalises ; les paragraphes sans texte sont ecartes.
+  function normalizeRich(paras) {
+    return (paras || []).map((p) => ({
+      type: TYPES.includes(p.type) ? p.type : 'p',
+      fmt: cleanFmt(p.fmt),
+      runs: mergeChars(styledChars(p.runs, false)),
+    })).filter((p) => richText(p).length > 0);
+  }
+
+  // Reporte les styles de l'editeur (gras, souligne) sur les runs d'origine :
+  // couleur, barre et autres attributs viennent du texte d'origine a la meme
+  // place (prefixe / suffixe communs), le texte insere prend ceux du
+  // caractere voisin.
+  function carryRuns(origRuns, newRuns) {
+    const oldC = styledChars(origRuns, true);
+    const newC = styledChars(newRuns, false);
+    let p = 0;
+    while (p < oldC.length && p < newC.length && oldC[p].c === newC[p].c) p++;
+    let s = 0;
+    while (s < oldC.length - p && s < newC.length - p &&
+      oldC[oldC.length - 1 - s].c === newC[newC.length - 1 - s].c) s++;
+    const replaced = oldC.length - s - p > 0;
+    const srcAt = (k) => {
+      if (!oldC.length) return -1;
+      if (k < p) return oldC[k].ri;
+      if (k >= newC.length - s) return oldC[oldC.length - (newC.length - k)].ri;
+      return oldC[Math.min(Math.max(replaced ? p : p - 1, 0), oldC.length - 1)].ri;
+    };
+    const out = [];
+    newC.forEach((ch, k) => {
+      const ri = srcAt(k);
+      const last = out[out.length - 1];
+      if (last && last.ri === ri && last.bold === ch.bold && last.underline === ch.underline) last.text += ch.c;
+      else out.push({ ri, text: ch.c, bold: ch.bold, underline: ch.underline });
+    });
+    return out.map(({ ri, text, bold, underline }) => ({ ...(ri >= 0 ? origRuns[ri] : {}), text, bold, underline }));
+  }
+
+  function sameRich(a, b) {
+    return a.type === b.type && JSON.stringify(a.fmt) === JSON.stringify(b.fmt) &&
+      JSON.stringify(a.runs) === JSON.stringify(b.runs);
+  }
+
+  // Applique les paragraphes de l'editeur riche au modele de blocs (mode
+  // « blocs »). Memes regles que applyEdit pour les suppressions, ajouts et
+  // corrections ; en plus, un paragraphe dont seule la mise en forme change
+  // (alignement, gras, type...) est mis a jour, et un paragraphe inchange
+  // reste le MEME objet.
+  function applyRichEdit(blocks, richParas, settings) {
+    const paras = normalizeRich(richParas);
+    const visible = visibleBlocks(blocks, settings);
+    const ops = alignParagraphs(visible.map(blockText), paras.map(richText));
+
+    const decision = new Map();  // bloc visible -> { drop } | { block }
+    const addAfter = new Map();  // bloc visible -> [paragraphes ajoutes juste apres lui]
+    const addBefore = [];
+    let lastVisible = null;
+    for (const o of ops) {
+      if (o.op === 'keep' || o.op === 'edit') {
+        const b = visible[o.i], para = paras[o.j];
+        lastVisible = b;
+        if (sameRich(toRichParagraph(b), para)) continue;
+        decision.set(b, { block: { ...b, type: para.type, fmt: para.fmt, runs: carryRuns(b.runs, para.runs), edited: true } });
+      } else if (o.op === 'del') {
+        decision.set(visible[o.i], { drop: true });
+        lastVisible = visible[o.i];
+      } else if (o.op === 'add') {
+        if (lastVisible) {
+          if (!addAfter.has(lastVisible)) addAfter.set(lastVisible, []);
+          addAfter.get(lastVisible).push(paras[o.j]);
+        } else addBefore.push(paras[o.j]);
+      }
+    }
+
+    // Un paragraphe ajoute prend la place (page, conteneur) du bloc voisin.
+    const cloneFor = (model, para) => ({
+      type: para.type, fmt: para.fmt, srcPage: model.srcPage, bbox: model.bbox, size: model.size,
+      srcType: model.srcType, added: true, runs: para.runs,
+    });
+    const firstVisible = visible[0];
+    const out = [];
+    for (const b of blocks) {
+      if (b === firstVisible) for (const t of addBefore) out.push(cloneFor(b, t));
+      const d = decision.get(b);
+      if (d && d.drop) {
+        for (const t of addAfter.get(b) || []) out.push(cloneFor(b, t));
+        continue;
+      }
+      out.push(d && d.block ? d.block : b);
+      for (const t of addAfter.get(b) || []) out.push(cloneFor(b, t));
+    }
+    return out;
+  }
+
+  // Mode « texte simple » a partir de paragraphes riches : un document de
+  // paragraphes sans cadre, tableau ni image, qui garde types et mise en forme.
+  function plainDocumentFromRich(richParas) {
+    const paras = normalizeRich(richParas);
+    const TOP = 1e6, STEP = 40;
+    const blocks = paras.map((p, k) => ({
+      type: p.type, srcPage: 1, plain: true, fmt: p.fmt,
+      runs: p.runs.map((r) => ({ ...r })),
+      bbox: { x0: 0, x1: A4_PT.width, y0: TOP - k * STEP - 20, y1: TOP - k * STEP },
+    }));
+    const extraction = {
+      blocks,
+      pageShapes: [{ boxes: [], lines: [], decorative: [] }],
+      pageSizes: [{ width: A4_PT.width, height: A4_PT.height, modalSize: 12 }],
+    };
+    return { blocks, extraction };
+  }
+
   window.TextEdit = {
+    BREAK,
+    TYPES,
+    cleanFmt,
+    toRichParagraphs,
+    normalizeRich,
+    richText,
+    carryRuns,
+    applyRichEdit,
+    plainDocumentFromRich,
     blockText,
     isEditable,
     visibleBlocks,

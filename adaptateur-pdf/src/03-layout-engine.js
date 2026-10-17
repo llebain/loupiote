@@ -154,6 +154,59 @@
     return w;
   }
 
+  // Retour a la ligne force dans un run (U+2028 SEPARATEUR DE LIGNE) : choisi
+  // parce qu'il n'apparait jamais dans le texte extrait d'un PDF, et que
+  // \s le reconnait (il est donc traite comme un blanc partout ailleurs :
+  // largeur du mot le plus long, texte normalise de la relecture).
+  const BREAK_CHAR = '\u2028';
+
+  // Mise en forme d'un paragraphe (bloc.fmt, posee par l'editeur) :
+  //   align  : 'left' | 'center' | 'right' | 'justify'
+  //   lineHeight : interligne propre au bloc (>= 1,5, plancher d'accessibilite)
+  //   before / after : espace EN PLUS de l'espace normal entre paragraphes,
+  //   avant / apres, en lignes de corps (jamais negatif : pas de chevauchement)
+  //   indent : retrait a gauche, en niveaux (1 niveau = 1,5 x le corps)
+  const ALIGNS = ['left', 'center', 'right', 'justify'];
+  function blockFmt(block) {
+    const f = (block && block.fmt) || {};
+    const num = (v) => (v === undefined || v === null || v === '' || !isFinite(Number(v)) ? null : Number(v));
+    const lh = num(f.lineHeight), before = num(f.before), after = num(f.after), indent = num(f.indent);
+    return {
+      align: ALIGNS.includes(f.align) ? f.align : 'left',
+      lineHeight: lh === null ? null : Math.max(1.5, lh),
+      before: before === null ? 0 : Math.max(0, before),
+      after: after === null ? 0 : Math.max(0, after),
+      indent: indent === null ? 0 : Math.max(0, indent),
+    };
+  }
+
+  // Aligne les lignes d'un paragraphe dans `avail` (largeur du texte, apres
+  // retrait). Gauche : inchange. Centre / droite : la ligne est decalee.
+  // Justifie : l'espace restant est reparti entre les mots (les segments sont
+  // decoupes mot a mot, chaque blanc elargi garde sa largeur propre, donc
+  // apercu et PDF se placent de la meme facon) ; la derniere ligne du
+  // paragraphe et celles qui finissent par un retour force restent a gauche.
+  function alignLines(wrapped, align, avail, sizePt, measurer, settings) {
+    return wrapped.map((l, wi) => {
+      const free = avail - l.width;
+      if (align === 'center') return { ...l, dx: Math.max(0, free / 2) };
+      if (align === 'right') return { ...l, dx: Math.max(0, free) };
+      if (align !== 'justify' || l.forced || wi === wrapped.length - 1) return l;
+      const spaces = l.segments.reduce((a, sg) => a + (sg.text.match(/ /g) || []).length, 0);
+      if (!spaces || free <= 0.01) return l;
+      const extra = free / spaces;
+      const segments = [];
+      for (const sg of l.segments) {
+        for (const part of sg.text.split(/( +)/).filter((p) => p !== '')) {
+          const isGap = /^ +$/.test(part);
+          const w = applySpacingToWidth(measurer.widthOf(part, sizePt, sg.style), part, settings) + (isGap ? extra * part.length : 0);
+          segments.push({ ...sg, text: part, width: w, gap: isGap || undefined });
+        }
+      }
+      return { ...l, segments, width: avail };
+    });
+  }
+
   // Decoupe une sequence de runs {text,bold,italic} en lignes tenant dans
   // `maxWidth`, en respectant les styles (gras/italique melanges dans une
   // meme ligne). Retourne un tableau de lignes = tableau de segments
@@ -186,8 +239,11 @@
     let cur = null;
     for (const run of runs) {
       const style = styleForRun(run);
-      const parts = (run.text || '').split(/(\s+)/).filter((p) => p !== '');
+      // Retour a la ligne force (editeur, 04b-text-edit.js : BREAK_CHAR) :
+      // coupe la ligne en cours quelle que soit sa largeur restante.
+      const parts = (run.text || '').split(new RegExp('([' + BREAK_CHAR + ']|\\s+)')).filter((p) => p !== '');
       for (const part of parts) {
+        if (part === BREAK_CHAR) { words.push({ br: true }); cur = null; continue; }
         const piece = { text: part, style, color: run.color, strikethrough: run.strikethrough, underline: run.underline };
         if (/^\s+$/.test(part)) { words.push({ space: true, pieces: [piece] }); cur = null; }
         else if (cur) cur.pieces.push(piece);
@@ -196,6 +252,7 @@
     }
     const measurePiece = (pc) => applySpacingToWidth(measurer.widthOf(pc.text, sizePt, pc.style), pc.text, settings);
     for (const w of words) {
+      if (w.br) continue;
       for (const pc of w.pieces) pc.width = measurePiece(pc);
       w.width = w.pieces.reduce((a, pc) => a + pc.width, 0);
     }
@@ -229,18 +286,21 @@
     let current = [];
     let currentWidth = 0;
 
-    function pushLine() {
+    function pushLine(forced) {
       // Retire les espaces de fin de ligne
       while (current.length && current[current.length - 1].space) {
         currentWidth -= current[current.length - 1].width;
         current.pop();
       }
-      if (current.length) lines.push(current);
+      // Une ligne vide n'est gardee que si elle vient d'un retour a la ligne
+      // force (ligne blanche voulue) ; jamais en fin de bloc.
+      if (current.length || forced) { current.forced = !!forced; lines.push(current); }
       current = [];
       currentWidth = 0;
     }
 
     for (const word of words) {
+      if (word.br) { pushLine(true); continue; }
       if (word.space) {
         if (current.length === 0) continue; // pas d'espace en debut de ligne
         current.push(word);
@@ -275,7 +335,7 @@
         }
       }
       const totalWidth = merged.reduce((a, s) => a + s.width, 0);
-      return { segments: merged, width: totalWidth };
+      return { segments: merged, width: totalWidth, forced: !!ws.forced };
     });
   }
 
@@ -655,6 +715,7 @@
     const lines = [];
     const images = [];
     let y = startY;
+    let lastGap = paraGap; // espace laisse sous le dernier element (retire de la hauteur)
     // v0.3 (E6) : icone (petite image, mascotte) en attente d'etre posee a
     // gauche du bloc de texte qui la suit.
     let pendingIcon = null;
@@ -667,6 +728,7 @@
         let w = h * (block.width / block.height);
         if (w > width / 2) { w = width / 2; h = w * (block.height / block.width); }
         if (pendingIcon) y = Math.max(y, pendingIcon.y + pendingIcon.height + paraGap);
+        lastGap = paraGap;
         pendingIcon = { y, x: 0, width: w, height: h, src: block.dataUrl };
         images.push(pendingIcon);
         continue;
@@ -704,14 +766,17 @@
         }
         images.push({ y, x: 0, width: w, height: h, src: block.dataUrl });
         y += h + paraGap;
+        lastGap = paraGap;
         continue;
       }
       const isHeading = block.type === 'h1' || block.type === 'h2' || block.type === 'h3';
       const isListItem = block.type === 'li';
       const sizePt = isHeading ? bodySize * HEADING_FACTORS[block.type] : bodySize;
-      const lineGap = isHeading ? sizePt * settings.lineHeight : bodyLineGap;
+      const fmt = blockFmt(block);
+      const lineGap = sizePt * (fmt.lineHeight || settings.lineHeight);
       let runs = runsForDisplay(block.runs, settings);
-      let indent = 0;
+      let indent = fmt.indent * 1.5 * bodySize;
+      y += fmt.before * bodyLineGap;
       if (isListItem) {
         indent = sizePt * 1.2;
         runs = [{ text: '•  ', bold: false, italic: false }, ...runs];
@@ -731,7 +796,7 @@
         }
         pendingIcon = null;
       }
-      const wrapped = wrapRuns(runs, width - indent, sizePt, measurer, settings);
+      const wrapped = alignLines(wrapRuns(runs, width - indent, sizePt, measurer, settings), fmt.align, width - indent, sizePt, measurer, settings);
       // ADDENDUM 6, Z12, F1 -- `isLastLine` marque la derniere ligne de CE
       // bloc source : elle s'arrete la ou le texte s'arrete, pas la ou le
       // retour a la ligne automatique l'a coupee. Sert au calcul de
@@ -739,14 +804,19 @@
       // automatique) et au harnais visuel, qui doit appliquer exactement la
       // meme definition sur le DOM rendu (cf. visual.mjs).
       wrapped.forEach((l, wi) => {
-        lines.push({ y: y + lineGap * 0.8, x: indent, segments: l.segments, sizePt, isHeading, isListItem, isLastLine: wi === wrapped.length - 1 });
+        // Un retour force termine lui aussi un « bloc » de lecture : la ligne
+        // courte qui le precede n'est pas un retour automatique (F1).
+        lines.push({ y: y + lineGap * 0.8, x: indent + (l.dx || 0), segments: l.segments, sizePt, lineGap, isHeading, isListItem, isLastLine: wi === wrapped.length - 1 || l.forced });
         y += lineGap;
       });
       if (iconBottom !== null) y = Math.max(y, iconBottom);
-      y += paraGap;
+      lastGap = paraGap + fmt.after * bodyLineGap;
+      y += lastGap;
     }
-    if (pendingIcon) y = Math.max(y, pendingIcon.y + pendingIcon.height + paraGap);
-    return { lines, images, height: Math.max(0, y - startY - paraGap) };
+    if (pendingIcon) { y = Math.max(y, pendingIcon.y + pendingIcon.height + paraGap); lastGap = paraGap; }
+    // `trailing` : espace supplementaire demande apres le dernier paragraphe
+    // (le flux libre l'ajoute a la hauteur de son item, un conteneur l'ignore).
+    return { lines, images, height: Math.max(0, y - startY - lastGap), trailing: lastGap - paraGap };
   }
 
   // Point d'entree : construit la mise en page par blocs d'UNE page source
@@ -1201,7 +1271,9 @@
           srcTopY: block.bbox.y1, srcBottomY: block.bbox.y0, srcLeftX: block.bbox.x0, srcCenterX: (block.bbox.x0 + block.bbox.x1) / 2 });
         continue;
       }
-      const { lines, height } = reflowBlocksInWidth([block], usableWidth, settings, measurer, 0);
+      const reflowed = reflowBlocksInWidth([block], usableWidth, settings, measurer, 0);
+      const lines = reflowed.lines;
+      const height = reflowed.height + reflowed.trailing;
       items.push({
         kind: 'flow', x: margin, y: 0 /* recalcule ci-dessous */, width: usableWidth, height,
         lines,
@@ -1753,7 +1825,7 @@
     // la construction, avec le lineGap de CETTE ligne (les tailles de ligne
     // different pour un titre, cf. HEADING_FACTORS).
     const bodyLineGap0 = settings.fontSize * settings.lineHeight;
-    const lineGap0 = restLinesRaw[0].isHeading ? restLinesRaw[0].sizePt * settings.lineHeight : bodyLineGap0;
+    const lineGap0 = restLinesRaw[0].lineGap || (restLinesRaw[0].isHeading ? restLinesRaw[0].sizePt * settings.lineHeight : bodyLineGap0);
     const offset = restLinesRaw[0].y - boxPad - lineGap0 * 0.8; // le fragment "reste" repart en haut avec son propre rembourrage
     const restLines = restLinesRaw.map((l) => ({ ...l, y: l.y - offset }));
 
@@ -2000,5 +2072,7 @@
     assignBlocksToContainers,
     MM_TO_PT,
     MARGIN_MM,
+    BREAK_CHAR,
+    blockFmt,
   };
 })();

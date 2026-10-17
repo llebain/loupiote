@@ -20,8 +20,16 @@ personnel) pour un enfant malvoyant.
    simplifié, en-têtes et numéros de page) dans le panneau latéral —
    l'aperçu se met à jour immédiatement.
 4. Au besoin, cliquer sur « Modifier le texte » : le texte du document
-   s'affiche à côté de l'aperçu, on y supprime une phrase en trop ou on
-   corrige une faute, puis « Appliquer les modifications ».
+   s'affiche à côté de l'aperçu dans un **éditeur de type traitement de
+   texte**. On y tape, on supprime, on corrige, et une barre d'outils permet
+   de mettre en **gras** ou en **souligné**, d'**aller à la ligne**
+   (Maj + Entrée), d'**aligner** (gauche, centré, droite) ou de **justifier**
+   un paragraphe, de changer son **interligne**, l'**espace avant / après**
+   et le **retrait**, et de choisir son style (paragraphe, titre 1 à 3, liste
+   à puces). Sélectionner un ou plusieurs paragraphes puis choisir la mise en
+   forme ; Ctrl+Z annule. L'aperçu se met à jour tout seul (« Appliquer
+   maintenant » force la mise à jour). Pas d'italique (décision E9). Le texte
+   collé perd sa mise en forme d'origine.
 5. Cliquer sur « Télécharger le PDF adapté », ou « Imprimer » en filet de
    sécurité.
 

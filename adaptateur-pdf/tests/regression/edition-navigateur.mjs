@@ -43,6 +43,22 @@ async function deposer(page, fixture) {
 const textePages = (page) => page.evaluate(() => [...document.querySelectorAll('.page-apercu .ligne')].map((l) => l.textContent).join('\n'));
 const nb = (page, sel) => page.evaluate((s) => document.querySelectorAll(s).length, sel);
 const attendreApercu = (page) => page.waitForTimeout(400);
+// L'editeur est un champ riche : un <p> par paragraphe.
+const texteEditeur = (page) => page.evaluate(() => [...document.querySelectorAll('#editeur-texte > p')].map((p) => p.textContent).join('\n\n'));
+const remplirEditeur = (page, texte) => page.evaluate((t) => {
+  // Les paragraphes gardent type et mise en forme de celui qui avait le meme
+  // texte (ou le meme rang) : on remplace du TEXTE, pas la structure.
+  const ed = document.getElementById('editeur-texte');
+  const anciens = [...ed.children].map((p) => ({ texte: p.textContent, type: p.dataset.type, fmt: p.dataset.fmt }));
+  ed.replaceChildren(...t.split('\n\n').map((x, i) => {
+    const p = document.createElement('p');
+    p.textContent = x;
+    const ref = anciens.find((a) => a.texte === x) || anciens[i];
+    if (ref) { p.dataset.type = ref.type || 'p'; p.dataset.fmt = ref.fmt || '{}'; }
+    return p;
+  }));
+  ed.dispatchEvent(new Event('input', { bubbles: true }));
+}, texte);
 
 async function main() {
   const launch = process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' };
@@ -124,14 +140,14 @@ async function main() {
       return a.left >= e.right - 1;
     });
     check('editeur/a-cote-de-l-apercu', aCote, 'le panneau n\'est pas a cote de l\'apercu');
-    const texte = await page.inputValue('#editeur-texte');
+    const texte = await texteEditeur(page);
     const paragraphes = texte.split(/\n\n/);
     check('editeur/texte-extrait', paragraphes.length > 4 && paragraphes.every((p) => p.trim()), `${paragraphes.length} paragraphe(s)`);
     check('editeur/meme-texte-que-l-apercu', paragraphes.every((p) => avant.replace(/\s+/g, ' ').includes(p.slice(0, 20))), 'le panneau montre un texte different de l\'apercu');
 
     // Suppression d'une phrase en trop.
     const cible = paragraphes[2];
-    await page.fill('#editeur-texte', paragraphes.filter((_, i) => i !== 2).join('\n\n'));
+    await remplirEditeur(page, paragraphes.filter((_, i) => i !== 2).join('\n\n'));
     await page.click('#btn-appliquer-texte');
     await attendreApercu(page);
     let apres = (await textePages(page)).replace(/\s+/g, ' ');
@@ -141,8 +157,8 @@ async function main() {
 
     // Correction d'un mot, puis changement de reglage SANS appliquer : la
     // saisie n'est pas perdue.
-    const t2 = await page.inputValue('#editeur-texte');
-    await page.fill('#editeur-texte', t2.replace(/^(\S+)/, 'CORRIGE'));
+    const t2 = await texteEditeur(page);
+    await remplirEditeur(page, t2.replace(/^(\S+)/, 'CORRIGE'));
     await page.selectOption('#reglage-interligne', '1.75');
     await attendreApercu(page);
     check('editeur/saisie-conservee-au-changement-de-reglage', /CORRIGE/.test(await textePages(page)), 'la correction non appliquee est perdue');
@@ -151,11 +167,12 @@ async function main() {
     await attendreApercu(page);
 
     // Mode « texte simple ».
+    await page.evaluate(() => { document.getElementById('editeur-options').open = true; });
     await page.check('#editeur-mode-brut');
     await page.click('#btn-appliquer-texte');
     await attendreApercu(page);
     const gras = await page.evaluate(() => [...document.querySelectorAll('.page-apercu .ligne')].filter((l) => l.style.fontWeight === 'bold').length);
-    check('editeur/brut-plus-de-titre', gras === 0, `${gras} ligne(s) en gras`);
+    check('editeur/brut-garde-les-titres', gras > 0, 'les titres ont disparu en mode texte seulement (types gardes depuis l\'editeur)');
     check('editeur/brut-texte-conserve', /CORRIGE/.test(await textePages(page)), 'texte perdu en mode texte simple');
     check('editeur/brut-pas-de-cadre', (await nb(page, '.bloc-boite, .cellule-tableau, img.image-apercu')) === 0, 'cadre ou tableau en mode texte simple');
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#btn-telecharger')]);
@@ -174,7 +191,7 @@ async function main() {
     await page.click('#btn-restaurer-texte');
     await attendreApercu(page);
     check('editeur/restaurer', (await textePages(page)) === avant, 'le texte d\'origine n\'est pas restaure');
-    check('editeur/restaurer-panneau', (await page.inputValue('#editeur-texte')) === texte, 'le panneau n\'est pas restaure');
+    check('editeur/restaurer-panneau', (await texteEditeur(page)) === texte, 'le panneau n\'est pas restaure');
 
     // Fermer.
     await page.click('#btn-modifier-texte');
@@ -182,7 +199,7 @@ async function main() {
 
     // Nouveau document : le panneau repart de zero.
     await page.click('#btn-modifier-texte');
-    await page.fill('#editeur-texte', 'Autre texte.');
+    await remplirEditeur(page, 'Autre texte.');
     await page.click('#btn-appliquer-texte');
     await attendreApercu(page);
     await deposer(page, '04-entete-pied-repetes.pdf');

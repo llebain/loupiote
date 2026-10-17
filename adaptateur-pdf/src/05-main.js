@@ -21,9 +21,11 @@
 
   let masterBlocks = null; // tous les blocs extraits (avant filtrage pages de garde), jamais modifies
   let workingBlocks = null; // masterBlocks apres les corrections de texte (mode « blocs », 04b-text-edit.js)
-  let plainText = null; // non nul : le document est reconstruit depuis ce texte brut (mode « texte simple »)
+  let plainParas = null; // non nul : le document est reconstruit depuis ces paragraphes (mode « texte seulement »)
   let editorOpen = false;
-  let editorSnapshot = null; // { mode, text } au moment du remplissage du panneau : detecte les modifications non appliquees
+  let editorSnapshot = null; // { mode, key } au moment du remplissage du panneau : detecte les modifications non appliquees
+  let editorTimer = null; // application differee de la saisie (apercu a jour tout seul)
+  let editorRange = null; // derniere selection dans l'editeur (les listes deroulantes la font perdre)
   let masterExtraction = null; // pageShapes/pageSizes de l'extraction (ADDENDUM 6, Z4.4 : moteur par blocs)
   let currentBlocks = null; // blocs effectivement utilises pour la mise en page (apres filtrage)
   let currentLayout = null;
@@ -209,7 +211,7 @@
       if (estCellule) lineDiv.dataset.celluleTableau = '1';
       lineDiv.style.left = Math.round(line.x * scale) + 'px';
       lineDiv.style.top = Math.round((line.y - line.sizePt * 0.8) * scale) + 'px';
-      lineDiv.style.fontSize = Math.max(6, Math.round(line.sizePt * scale)) + 'px';
+      lineDiv.style.fontSize = Math.max(6, Math.round(line.sizePt * scale * 100) / 100) + 'px'; // fractionnaire : les largeurs calculees (justification) restent exactes a l'ecran
       lineDiv.style.fontWeight = line.isHeading ? 'bold' : 'normal';
       lineDiv.style.letterSpacing = settings.letterSpacing !== 'normal' ? settings.letterSpacing : 'normal';
       lineDiv.style.wordSpacing = settings.wordSpacing === 'elargi' ? '0.4em' : 'normal';
@@ -220,6 +222,9 @@
         if (deco) span.style.textDecoration = deco;
         span.style.color = rgbCss(window.LayoutEngine.resolveTextColor(seg.color, settings, theme, bg));
         span.textContent = seg.text;
+        // Blanc elargi par la justification : largeur exacte du moteur de mise
+        // en page, comme dans l'export PDF.
+        if (seg.gap) { span.style.display = 'inline-block'; span.style.width = (seg.width * scale) + 'px'; }
         lineDiv.appendChild(span);
       }
       container.appendChild(lineDiv);
@@ -374,7 +379,9 @@
     }
   }
 
-  function recomputeLayoutAndRender() {
+  // `keepEditor` : la mise en page est recalculee depuis une saisie dans
+  // l'editeur ; on ne le remplit pas a nouveau (le curseur resterait nulle part).
+  function recomputeLayoutAndRender(keepEditor) {
     if (!masterBlocks) return;
     const settings = readSettingsFromUI();
     saveSettings(settings);
@@ -383,9 +390,9 @@
     // d'un reglage.
     if (editorOpen && editorIsDirty()) commitEditor(settings);
     let blocks, extraction;
-    if (plainText !== null) {
-      // Mode « texte simple » : le document est reconstruit depuis le texte.
-      const plain = window.TextEdit.plainDocument(plainText);
+    if (plainParas !== null) {
+      // Mode « texte seulement » : le document est reconstruit depuis les paragraphes.
+      const plain = window.TextEdit.plainDocumentFromRich(plainParas);
       blocks = plain.blocks;
       extraction = plain.extraction;
     } else {
@@ -404,10 +411,18 @@
     els.btnTelecharger.disabled = false;
     els.btnImprimer.disabled = false;
     els.btnModifierTexte.disabled = false;
-    if (editorOpen) fillEditor(settings);
+    if (editorOpen && !keepEditor) fillEditor(settings);
   }
 
-  // --- Relecture du texte (04b-text-edit.js) --------------------------------
+  // --- Relecture et mise en forme du texte (04b-text-edit.js) -------------------
+  //
+  // L'editeur est un champ `contenteditable` : un <p> par paragraphe, portant
+  // son type (data-type) et sa mise en forme (data-fmt, JSON). Gras et
+  // souligne sont des <b> / <u>, un retour force un <br>. Le modele n'est
+  // jamais lu dans le DOM autrement que par readEditor(), ni ecrit autrement
+  // que par fillEditor().
+
+  const FMT_DEFAULT_LH = 1.5;
 
   function editorMode() {
     return els.editeurModeBrut.checked ? 'brut' : 'blocs';
@@ -415,20 +430,99 @@
 
   function editorStatus(text) { els.editeurEtat.textContent = text || ''; }
 
-  // Remplit le panneau avec le texte actuellement affiche.
+  function paraFmt(p) {
+    try { return window.TextEdit.cleanFmt(JSON.parse(p.dataset.fmt || '{}')); } catch (e) { return {}; }
+  }
+
+  // Reflete type et mise en forme d'un paragraphe de l'editeur (apparence
+  // approchante : l'apercu a droite fait foi).
+  function paintPara(p) {
+    const fmt = paraFmt(p);
+    p.dataset.type = window.TextEdit.TYPES.includes(p.dataset.type) ? p.dataset.type : 'p';
+    p.dataset.fmt = JSON.stringify(fmt);
+    p.style.textAlign = fmt.align || 'left';
+    p.style.lineHeight = String(fmt.lineHeight || FMT_DEFAULT_LH);
+    p.style.marginTop = fmt.before ? (fmt.before * 1.5) + 'em' : '';
+    p.style.marginBottom = (0.6 + (fmt.after ? fmt.after * 1.5 : 0)) + 'em';
+    p.style.paddingLeft = (p.dataset.type === 'li' ? 1.4 : 0) + (fmt.indent || 0) * 1.5 + 'em';
+  }
+
+  function makePara(rich) {
+    const p = document.createElement('p');
+    p.dataset.type = rich.type;
+    p.dataset.fmt = JSON.stringify(rich.fmt || {});
+    for (const run of rich.runs) {
+      const parts = run.text.split(window.TextEdit.BREAK);
+      parts.forEach((part, i) => {
+        if (i > 0) p.appendChild(document.createElement('br'));
+        if (!part) return;
+        let node = document.createTextNode(part);
+        if (run.underline) { const u = document.createElement('u'); u.appendChild(node); node = u; }
+        if (run.bold) { const b = document.createElement('b'); b.appendChild(node); node = b; }
+        p.appendChild(node);
+      });
+    }
+    paintPara(p);
+    return p;
+  }
+
+  // Contenu de l'editeur -> paragraphes { type, fmt, runs }.
+  function readEditor() {
+    const BREAK = window.TextEdit.BREAK;
+    const isBold = (el, cur) => {
+      if (/^(B|STRONG)$/.test(el.tagName)) return true;
+      const w = el.style && el.style.fontWeight;
+      if (!w) return cur;
+      return w === 'bold' || w === 'bolder' || Number(w) >= 600;
+    };
+    const isUnderline = (el, cur) => {
+      if (el.tagName === 'U') return true;
+      const d = el.style && (el.style.textDecorationLine || el.style.textDecoration);
+      return d ? /underline/.test(d) : cur;
+    };
+    const paras = [];
+    const readPara = (host, type, fmt) => {
+      const runs = [];
+      const walk = (node, bold, underline) => {
+        if (node.nodeType === 3) { if (node.nodeValue) runs.push({ text: node.nodeValue, bold, underline }); return; }
+        if (node.nodeType !== 1) return;
+        if (node.tagName === 'BR') { runs.push({ text: BREAK, bold, underline }); return; }
+        const b = isBold(node, bold), u = isUnderline(node, underline);
+        const block = /^(DIV|P|LI|UL|OL)$/.test(node.tagName);
+        if (block && runs.length) runs.push({ text: BREAK, bold, underline });
+        node.childNodes.forEach((c) => walk(c, b, u));
+      };
+      host.childNodes.forEach((c) => walk(c, false, false));
+      paras.push({ type, fmt, runs });
+    };
+    els.editeurTexte.childNodes.forEach((node) => {
+      if (node.nodeType === 3) {
+        if (node.nodeValue.trim()) readPara({ childNodes: [node] }, 'p', {});
+      } else if (node.nodeType === 1) {
+        readPara(node, window.TextEdit.TYPES.includes(node.dataset.type) ? node.dataset.type : 'p', paraFmt(node));
+      }
+    });
+    return paras;
+  }
+
+  function editorKey(paras) { return JSON.stringify(window.TextEdit.normalizeRich(paras)); }
+
+  // Remplit l'editeur avec le texte actuellement affiche.
   function fillEditor(settings) {
     settings = settings || readSettingsFromUI();
-    let text;
-    if (editorMode() === 'brut' && plainText !== null) {
-      text = plainText;
+    const TE = window.TextEdit;
+    let paras;
+    if (editorMode() === 'brut' && plainParas !== null) {
+      paras = TE.normalizeRich(plainParas);
     } else {
-      const visible = window.TextEdit.visibleBlocks(workingBlocks, settings);
-      text = window.TextEdit.joinParagraphs(visible.map(window.TextEdit.blockText));
+      paras = TE.toRichParagraphs(workingBlocks, settings);
     }
-    els.editeurTexte.value = text;
-    editorSnapshot = { mode: editorMode(), text };
-    const n = window.TextEdit.parseParagraphs(text).length;
-    editorStatus(n + ' paragraphe' + (n > 1 ? 's' : '') + (plainText !== null ? ' — texte simple' : (isTextEdited() ? ' — texte modifié' : '')));
+    els.editeurTexte.replaceChildren(...paras.map(makePara));
+    editorSnapshot = { mode: editorMode(), key: editorKey(paras) };
+    editorRange = null;
+    const n = paras.length;
+    editorStatus(n + ' paragraphe' + (n > 1 ? 's' : '') + (plainParas !== null ? ' — texte seulement' : (isTextEdited() ? ' — texte modifié' : '')));
+    refreshToolbar();
   }
 
   function isTextEdited() {
@@ -436,20 +530,33 @@
   }
 
   function editorIsDirty() {
-    return !!editorSnapshot && els.editeurTexte.value !== editorSnapshot.text;
+    return !!editorSnapshot && editorKey(readEditor()) !== editorSnapshot.key;
   }
 
-  // Reporte le texte du panneau sur le document.
+  // Reporte le contenu de l'editeur sur le document.
   function commitEditor(settings) {
     settings = settings || readSettingsFromUI();
-    const text = els.editeurTexte.value;
+    const paras = readEditor();
     if (editorMode() === 'brut') {
-      plainText = text;
+      plainParas = window.TextEdit.normalizeRich(paras);
     } else {
-      plainText = null;
-      workingBlocks = window.TextEdit.applyEdit(workingBlocks, window.TextEdit.parseParagraphs(text), settings);
+      plainParas = null;
+      workingBlocks = window.TextEdit.applyRichEdit(workingBlocks, paras, settings);
     }
-    editorSnapshot = { mode: editorMode(), text };
+    editorSnapshot = { mode: editorMode(), key: editorKey(paras) };
+  }
+
+  // Apercu a jour tout seul, peu apres la derniere frappe ou le dernier
+  // reglage de mise en forme.
+  function scheduleApply() {
+    clearTimeout(editorTimer);
+    editorTimer = setTimeout(() => {
+      editorTimer = null;
+      if (!masterBlocks || !editorOpen || !editorIsDirty()) return;
+      commitEditor();
+      recomputeLayoutAndRender(true);
+      editorStatus('Modifications appliquées à l’aperçu.');
+    }, 700);
   }
 
   function openEditor(open) {
@@ -459,14 +566,127 @@
     els.btnModifierTexte.setAttribute('aria-expanded', open ? 'true' : 'false');
     els.btnModifierTexte.textContent = open ? 'Fermer le texte' : 'Modifier le texte';
     if (open) {
-      els.editeurModeBlocs.checked = plainText === null;
-      els.editeurModeBrut.checked = plainText !== null;
+      els.editeurModeBlocs.checked = plainParas === null;
+      els.editeurModeBrut.checked = plainParas !== null;
       fillEditor();
       els.editeurTexte.focus();
+    } else {
+      clearTimeout(editorTimer);
+      editorTimer = null;
     }
   }
 
+  // --- Barre d'outils -----------------------------------------------------------
+
+  // Paragraphes touches par la selection (ou celui du curseur).
+  function selectedParas() {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return [];
+    const range = sel.getRangeAt(0);
+    if (!els.editeurTexte.contains(range.commonAncestorContainer)) return [];
+    return [...els.editeurTexte.children].filter((p) => range.intersectsNode(p));
+  }
+
+  function saveEditorRange() {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount && els.editeurTexte.contains(sel.anchorNode)) editorRange = sel.getRangeAt(0).cloneRange();
+  }
+
+  function restoreEditorRange() {
+    els.editeurTexte.focus();
+    if (editorRange) {
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(editorRange);
+    }
+  }
+
+  // Etat des boutons et listes selon le paragraphe du curseur.
+  function refreshToolbar() {
+    const paras = selectedParas();
+    const first = paras[0];
+    const fmt = first ? paraFmt(first) : {};
+    document.querySelectorAll('#editeur-barre [data-align]').forEach((b) => {
+      b.setAttribute('aria-pressed', String((fmt.align || 'left') === b.dataset.align));
+    });
+    const type = first ? first.dataset.type || 'p' : 'p';
+    els.outilType.value = type;
+    els.outilInterligne.value = fmt.lineHeight ? String(fmt.lineHeight) : '';
+    els.outilAvant.value = String(fmt.before || 0);
+    els.outilApres.value = String(fmt.after || 0);
+    for (const [cmd, btn] of [['bold', els.outilGras], ['underline', els.outilSouligne]]) {
+      let on = false;
+      try { on = document.activeElement === els.editeurTexte && document.queryCommandState(cmd); } catch (e) { /* navigateur sans queryCommandState */ }
+      btn.setAttribute('aria-pressed', String(!!on));
+    }
+  }
+
+  // Modifie la mise en forme de chaque paragraphe touche.
+  function updateParas(change) {
+    const paras = selectedParas();
+    if (!paras.length) return;
+    for (const p of paras) {
+      const fmt = paraFmt(p);
+      const type = change(fmt, p.dataset.type || 'p');
+      if (type) p.dataset.type = type;
+      p.dataset.fmt = JSON.stringify(window.TextEdit.cleanFmt(fmt));
+      paintPara(p);
+    }
+    saveEditorRange();
+    refreshToolbar();
+    scheduleApply();
+  }
+
+  function wireToolbar() {
+    // Les boutons ne prennent pas le focus : la selection du texte reste en place.
+    document.querySelectorAll('#editeur-barre button').forEach((b) => b.addEventListener('mousedown', (e) => e.preventDefault()));
+
+    const run = (cmd) => {
+      restoreEditorRange();
+      document.execCommand(cmd, false, null);
+      saveEditorRange();
+      refreshToolbar();
+      scheduleApply();
+    };
+    document.querySelectorAll('#editeur-barre [data-cmd]').forEach((b) => b.addEventListener('click', () => run(b.dataset.cmd)));
+    els.outilSaut.addEventListener('click', () => run('insertLineBreak'));
+
+    document.querySelectorAll('#editeur-barre [data-align]').forEach((b) => b.addEventListener('click', () => {
+      restoreEditorRange();
+      updateParas((fmt) => { fmt.align = b.dataset.align; });
+    }));
+    document.querySelectorAll('#editeur-barre [data-indent]').forEach((b) => b.addEventListener('click', () => {
+      restoreEditorRange();
+      updateParas((fmt) => { fmt.indent = Math.min(4, Math.max(0, (Number(fmt.indent) || 0) + Number(b.dataset.indent))); });
+    }));
+    document.querySelectorAll('#editeur-barre select').forEach((sel) => sel.addEventListener('change', () => {
+      restoreEditorRange();
+      const prop = sel.dataset.prop, v = sel.value;
+      updateParas((fmt, type) => {
+        if (prop === 'type') return v;
+        if (prop === 'lineHeight') { if (v) fmt.lineHeight = Number(v); else delete fmt.lineHeight; } else fmt[prop] = Number(v);
+        return type;
+      });
+    }));
+
+    // La selection est aussi memorisee des que la souris ou le clavier la
+    // modifient (sans attendre selectionchange, qui arrive apres coup).
+    ['mouseup', 'keyup', 'pointerup'].forEach((ev) => els.editeurTexte.addEventListener(ev, () => { saveEditorRange(); refreshToolbar(); }));
+
+    // La selection du texte est memorisee AVANT que la liste deroulante ne
+    // prenne le focus (l'evenement selectionchange arrive trop tard, ou apres).
+    const barre = document.getElementById('editeur-barre');
+    ['pointerdown', 'focusin'].forEach((ev) => barre.addEventListener(ev, saveEditorRange, true));
+
+    document.addEventListener('selectionchange', () => {
+      if (!editorOpen) return;
+      saveEditorRange();
+      if (document.activeElement === els.editeurTexte) refreshToolbar();
+    });
+  }
+
   function wireEditorEvents() {
+    wireToolbar();
     els.btnModifierTexte.addEventListener('click', () => {
       if (!masterBlocks) return;
       if (editorOpen && editorIsDirty()) commitEditor(); // fermer ne perd jamais une saisie
@@ -476,15 +696,18 @@
     });
     els.btnAppliquerTexte.addEventListener('click', () => {
       if (!masterBlocks) return;
+      clearTimeout(editorTimer);
       commitEditor();
       editorSnapshot = null; // force le recalcul, meme sans modification (changement de mode)
-      recomputeLayoutAndRender();
+      recomputeLayoutAndRender(true);
+      editorSnapshot = { mode: editorMode(), key: editorKey(readEditor()) };
       editorStatus('Modifications appliquées.');
     });
     els.btnRestaurerTexte.addEventListener('click', () => {
       if (!masterBlocks) return;
+      clearTimeout(editorTimer);
       workingBlocks = masterBlocks;
-      plainText = null;
+      plainParas = null;
       els.editeurModeBlocs.checked = true;
       editorSnapshot = null;
       recomputeLayoutAndRender();
@@ -492,23 +715,34 @@
     });
     [els.editeurModeBlocs, els.editeurModeBrut].forEach((radio) => {
       radio.addEventListener('change', () => {
-        // Blocs -> texte simple : le texte tape est conserve tel quel.
-        // Texte simple -> blocs : le panneau reprend le texte du document
-        // structure (une saisie non appliquee est abandonnee).
+        // Mise en page d'origine -> texte seulement : le contenu de l'editeur
+        // est conserve tel quel. Texte seulement -> mise en page d'origine :
+        // l'editeur reprend le document structure (saisie non appliquee abandonnee).
         if (editorMode() === 'blocs') {
           const dirty = editorIsDirty();
           fillEditor();
           if (dirty) editorStatus('Modifications non appliquées abandonnées.');
         } else {
-          editorSnapshot = { mode: 'brut', text: els.editeurTexte.value };
-          editorStatus('Après « Appliquer », le document ne gardera que ce texte.');
+          editorSnapshot = { mode: 'brut', key: editorKey(readEditor()) };
+          editorStatus('Après « Appliquer maintenant », le document ne gardera que ce texte.');
         }
       });
     });
+    els.editeurTexte.addEventListener('input', () => { refreshToolbar(); scheduleApply(); });
     els.editeurTexte.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); els.btnAppliquerTexte.click(); }
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key === 'Enter') { e.preventDefault(); els.btnAppliquerTexte.click(); }
+      else if (mod && (e.key === 'i' || e.key === 'I')) e.preventDefault(); // pas d'italique (E9)
     });
+    // Le texte colle perd sa mise en forme d'origine (polices, couleurs...).
+    els.editeurTexte.addEventListener('paste', (e) => {
+      e.preventDefault();
+      const text = (e.clipboardData || window.clipboardData).getData('text/plain');
+      document.execCommand('insertText', false, text.replace(/\r\n?/g, '\n'));
+    });
+    document.execCommand('defaultParagraphSeparator', false, 'p');
   }
+
   async function handleDownload() {
     const doc = window.PdfExport.createExportDoc(jsPDFCtor, currentLayout.pages[0].pageDims);
     window.PdfExport.renderLayoutToPdf(doc, currentLayout, currentFileName);
@@ -573,7 +807,7 @@
     els.btnImprimer.disabled = true;
     masterBlocks = null;
     workingBlocks = null;
-    plainText = null;
+    plainParas = null;
     editorSnapshot = null;
     openEditor(false);
     els.btnModifierTexte.disabled = true;
@@ -768,6 +1002,13 @@
     els.editeurModeBlocs = q('editeur-mode-blocs');
     els.editeurModeBrut = q('editeur-mode-brut');
     els.editeurTexte = q('editeur-texte');
+    els.outilType = q('outil-type');
+    els.outilInterligne = q('outil-interligne');
+    els.outilAvant = q('outil-avant');
+    els.outilApres = q('outil-apres');
+    els.outilGras = q('outil-gras');
+    els.outilSouligne = q('outil-souligne');
+    els.outilSaut = q('outil-saut');
     els.editeurEtat = q('editeur-etat');
     els.btnAppliquerTexte = q('btn-appliquer-texte');
     els.btnRestaurerTexte = q('btn-restaurer-texte');
@@ -792,6 +1033,19 @@
 
     setProgress('Chargement des composants (pdf.js, jsPDF)…', true);
     try {
+      // Police Luciole de l'apercu : celle embarquee dans l'outil (la meme que
+      // l'export PDF), pas celle qui serait installee sur l'ordinateur. Sans
+      // elle l'apercu retombe sur une autre police dont les largeurs different :
+      // texte justifie ou centre mal place a l'ecran.
+      if (window.FontFace && document.fonts) {
+        for (const [asset, weight] of [['lucioleRegular', 'normal'], ['lucioleBold', 'bold']]) {
+          try {
+            const face = new FontFace('Luciole', window.LibLoader.b64ToBytes(window.ASSETS[asset]), { weight });
+            await face.load();
+            document.fonts.add(face);
+          } catch (e) { /* police locale ou de secours : apercu moins fidele, export inchange */ }
+        }
+      }
       pdfjsLib = await window.LibLoader.initPdfJs();
       jsPDFCtor = await window.LibLoader.initJsPDF();
       await window.LibLoader.initTesseractMain();
