@@ -131,24 +131,78 @@ __CSS__
     <div id="espace-travail">
       <section id="editeur" hidden aria-labelledby="editeur-titre">
         <h2 id="editeur-titre">Modifier le texte</h2>
-        <p>Supprimez les phrases en trop, corrigez les fautes : la mise en page est refaite à partir de ce texte. Séparez les paragraphes par une ligne vide.</p>
-        <fieldset id="editeur-mode">
+        <p>Comme dans un traitement de texte : sélectionnez, puis choisissez la mise en forme. <strong>Maj + Entrée</strong> : aller à la ligne. L'aperçu se met à jour tout seul.</p>
+        <div id="editeur-barre" role="toolbar" aria-label="Mise en forme du texte" aria-controls="editeur-texte">
+          <div class="groupe-outils" role="group" aria-label="Annuler">
+            <button type="button" id="outil-annuler" data-cmd="undo" title="Annuler (Ctrl+Z)">Annuler</button>
+            <button type="button" id="outil-retablir" data-cmd="redo" title="Rétablir (Ctrl+Y)">Rétablir</button>
+          </div>
+          <div class="groupe-outils" role="group" aria-label="Caractères">
+            <button type="button" id="outil-gras" data-cmd="bold" aria-pressed="false" title="Gras (Ctrl+B)"><b>G</b><span class="visually-hidden">ras</span></button>
+            <button type="button" id="outil-souligne" data-cmd="underline" aria-pressed="false" title="Souligné (Ctrl+U)"><u>S</u><span class="visually-hidden">ouligné</span></button>
+            <button type="button" id="outil-saut" title="Aller à la ligne (Maj + Entrée)">Aller à la ligne</button>
+          </div>
+          <div class="groupe-outils" role="group" aria-label="Alignement">
+            <button type="button" data-align="left" aria-pressed="false" title="Aligner à gauche">Gauche</button>
+            <button type="button" data-align="center" aria-pressed="false" title="Centrer">Centré</button>
+            <button type="button" data-align="right" aria-pressed="false" title="Aligner à droite">Droite</button>
+            <button type="button" data-align="justify" aria-pressed="false" title="Justifier">Justifié</button>
+          </div>
+          <div class="groupe-outils" role="group" aria-label="Paragraphe">
+            <label for="outil-type">Style</label>
+            <select id="outil-type" data-prop="type">
+              <option value="p">Paragraphe</option>
+              <option value="h1">Titre 1</option>
+              <option value="h2">Titre 2</option>
+              <option value="h3">Titre 3</option>
+              <option value="li">Liste à puces</option>
+            </select>
+            <label for="outil-interligne">Interligne</label>
+            <select id="outil-interligne" data-prop="lineHeight">
+              <option value="">Réglage général</option>
+              <option value="1.5">1,5</option>
+              <option value="1.75">1,75</option>
+              <option value="2">2</option>
+              <option value="2.5">2,5</option>
+              <option value="3">3</option>
+            </select>
+            <label for="outil-avant">Espace avant</label>
+            <select id="outil-avant" data-prop="before">
+              <option value="0">Normal</option>
+              <option value="0.5">+ ½ ligne</option>
+              <option value="1">+ 1 ligne</option>
+              <option value="2">+ 2 lignes</option>
+            </select>
+            <label for="outil-apres">Espace après</label>
+            <select id="outil-apres" data-prop="after">
+              <option value="0">Normal</option>
+              <option value="0.5">+ ½ ligne</option>
+              <option value="1">+ 1 ligne</option>
+              <option value="2">+ 2 lignes</option>
+            </select>
+            <button type="button" id="outil-retrait-moins" data-indent="-1" title="Réduire le retrait">Retrait −</button>
+            <button type="button" id="outil-retrait-plus" data-indent="1" title="Augmenter le retrait">Retrait +</button>
+          </div>
+        </div>
+        <div id="editeur-texte" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Texte du document" spellcheck="true" lang="fr"></div>
+        <div class="editeur-actions">
+          <button type="button" id="btn-appliquer-texte">Appliquer maintenant</button>
+          <button type="button" id="btn-restaurer-texte" class="secondary">Revenir au texte d'origine</button>
+        </div>
+        <details id="editeur-options">
+          <summary>Options</summary>
+          <fieldset id="editeur-mode">
           <legend>Après modification</legend>
           <p class="case-a-cocher">
             <input type="radio" name="editeur-mode" id="editeur-mode-blocs" value="blocs" checked>
-            <label for="editeur-mode-blocs">Garder la mise en forme (titres, gras, tableaux)</label>
+            <label for="editeur-mode-blocs">Garder la mise en page d'origine (tableaux, encadrés, images)</label>
           </p>
           <p class="case-a-cocher">
             <input type="radio" name="editeur-mode" id="editeur-mode-brut" value="brut">
-            <label for="editeur-mode-brut">Texte simple seulement (plus de titres, de tableaux ni d'images)</label>
+            <label for="editeur-mode-brut">Texte seulement (plus de tableaux, d'encadrés ni d'images)</label>
           </p>
         </fieldset>
-        <label for="editeur-texte">Texte du document</label>
-        <textarea id="editeur-texte" rows="14" spellcheck="true" lang="fr"></textarea>
-        <div class="editeur-actions">
-          <button type="button" id="btn-appliquer-texte">Appliquer les modifications</button>
-          <button type="button" id="btn-restaurer-texte" class="secondary">Revenir au texte d'origine</button>
-        </div>
+        </details>
         <p id="editeur-etat" role="status" aria-live="polite"></p>
       </section>
       <div id="apercu"></div>

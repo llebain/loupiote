@@ -156,7 +156,7 @@ main {
 #espace-travail { display: block; }
 #espace-travail.avec-editeur {
   display: grid;
-  grid-template-columns: minmax(300px, 40%) 1fr;
+  grid-template-columns: minmax(420px, 46%) 1fr;
   gap: 1.2em;
   align-items: start;
 }
@@ -177,18 +177,51 @@ main {
 #editeur h2 { margin: 0.2em 0; }
 #editeur fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 0 0 0.8em 0; padding: 0.4em 0.8em; }
 #editeur label { font-weight: 600; }
+#editeur-options { margin: 0.6em 0; }
+#editeur-options summary { cursor: pointer; font-weight: 600; min-height: 32px; }
+#editeur-barre {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5em;
+  margin: 0 0 0.6em 0;
+  position: sticky;
+  top: 0;
+  background: var(--panel-bg);
+  padding: 0.3em 0;
+  z-index: 2;
+}
+#editeur-barre .groupe-outils {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35em;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.3em 0.5em;
+}
+#editeur-barre button, #editeur-barre select { min-height: 40px; font-size: 0.9em; padding: 0.2em 0.6em; }
+#editeur-barre label { font-weight: normal; margin: 0 0 0 0.3em; }
+#editeur-barre button[aria-pressed="true"] { background: #1a3d8f; color: #fff; border-color: #1a3d8f; }
 #editeur-texte {
   display: block;
   width: 100%;
+  min-height: 16em;
+  box-sizing: border-box;
   font-family: "Luciole", sans-serif;
   font-size: 1.1em;
-  line-height: 1.5;
   padding: 0.6em;
+  background: #fff;
+  color: #000;
   border: 2px solid var(--border);
   border-radius: 8px;
-  resize: vertical;
-  min-height: 12em;
 }
+#editeur-texte:focus { outline: 3px solid #1a3d8f; outline-offset: 1px; }
+#editeur-texte p { margin: 0 0 0.6em 0; line-height: 1.5; }
+#editeur-texte p[data-type="h1"] { font-size: 1.5em; font-weight: bold; }
+#editeur-texte p[data-type="h2"] { font-size: 1.25em; font-weight: bold; }
+#editeur-texte p[data-type="h3"] { font-size: 1.1em; font-weight: bold; }
+#editeur-texte p[data-type="li"] { position: relative; padding-left: 1.4em; }
+#editeur-texte p[data-type="li"]::before { content: "\2022"; position: absolute; left: 0.3em; }
 .editeur-actions { display: flex; flex-wrap: wrap; gap: 0.6em; margin: 0.8em 0 0.4em; }
 #editeur-etat { min-height: 1.4em; font-weight: 600; margin: 0.2em 0; }
 
