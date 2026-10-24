@@ -195,18 +195,35 @@ main {
 #editeur h2 { margin: 0.2em 0; }
 #editeur fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 0 0 0.8em 0; padding: 0.4em 0.8em; }
 #editeur label { font-weight: 600; }
+.editeur-label { font-weight: 600; margin: 0.4em 0 0.3em; }
+#editeur-barre { display: flex; flex-wrap: wrap; gap: 0.4em; align-items: center; margin: 0 0 0.5em; }
+#editeur-barre button { min-height: 44px; padding: 0.3em 0.7em; }
+#editeur-barre button[aria-pressed="true"] { outline: 3px solid var(--border); font-weight: 700; }
+.editeur-separateur { width: 1px; align-self: stretch; background: var(--border); margin: 0 0.2em; }
+/* Interligne de l'editeur = interligne choisi pour le document (1,5 au
+   minimum, jamais en dessous) : --editeur-interligne est fixe par 05-main.js. */
 #editeur-texte {
   display: block;
   width: 100%;
+  box-sizing: border-box;
   font-family: "Luciole", sans-serif;
   font-size: 1.1em;
-  line-height: 1.5;
+  line-height: var(--editeur-interligne, 1.5);
   padding: 0.6em;
   border: 2px solid var(--border);
   border-radius: 8px;
-  resize: vertical;
   min-height: 12em;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: #fff;
+  color: #000;
 }
+#editeur-texte p { margin: 0 0 0.6em; line-height: inherit; min-height: 1.5em; }
+#editeur-texte p[data-align="left"] { text-align: left; }
+#editeur-texte p[data-align="center"] { text-align: center; }
+#editeur-texte p[data-align="right"] { text-align: right; }
+#editeur-texte p[data-align="justify"] { text-align: justify; }
+#editeur-texte p[data-label]::before { content: attr(data-label) "\00a0\00a0"; }
 .editeur-actions { display: flex; flex-wrap: wrap; gap: 0.6em; margin: 0.8em 0 0.4em; }
 #editeur-etat { min-height: 1.4em; font-weight: 600; margin: 0.2em 0; }
 
@@ -400,7 +417,7 @@ footer.mention-legale {
     <div id="espace-travail">
       <section id="editeur" hidden aria-labelledby="editeur-titre">
         <h2 id="editeur-titre">Modifier le texte</h2>
-        <p>Supprimez les phrases en trop, corrigez les fautes : la mise en page est refaite à partir de ce texte. Séparez les paragraphes par une ligne vide.</p>
+        <p>Supprimez les phrases en trop, corrigez les fautes : la mise en page est refaite à partir de ce texte. Chaque paragraphe garde sa place dans l'ordre du document. Placez le curseur dans un paragraphe pour l'aligner (gauche, centré, droite, justifié) ou lui ajouter une puce, un tiret ou un numéro.</p>
         <fieldset id="editeur-mode">
           <legend>Après modification</legend>
           <p class="case-a-cocher">
@@ -412,8 +429,18 @@ footer.mention-legale {
             <label for="editeur-mode-brut">Texte simple seulement (plus de titres, de tableaux ni d'images)</label>
           </p>
         </fieldset>
-        <label for="editeur-texte">Texte du document</label>
-        <textarea id="editeur-texte" rows="14" spellcheck="true" lang="fr"></textarea>
+        <p id="editeur-texte-label" class="editeur-label">Texte du document</p>
+        <div id="editeur-barre" role="toolbar" aria-label="Mise en forme du paragraphe" aria-controls="editeur-texte">
+          <button type="button" data-align="left" title="Aligner à gauche" aria-label="Aligner à gauche">⇤ Gauche</button>
+          <button type="button" data-align="center" title="Centrer" aria-label="Centrer">↔ Centré</button>
+          <button type="button" data-align="right" title="Aligner à droite" aria-label="Aligner à droite">⇥ Droite</button>
+          <button type="button" data-align="justify" title="Justifier" aria-label="Justifier">☰ Justifié</button>
+          <span class="editeur-separateur" aria-hidden="true"></span>
+          <button type="button" data-marker="bullet" title="Liste à puces" aria-label="Liste à puces">• Puces</button>
+          <button type="button" data-marker="dash" title="Liste à tirets" aria-label="Liste à tirets">– Tirets</button>
+          <button type="button" data-marker="number" title="Liste numérotée" aria-label="Liste numérotée">1. Numéros</button>
+        </div>
+        <div id="editeur-texte" role="textbox" aria-multiline="true" aria-labelledby="editeur-texte-label" contenteditable="true" spellcheck="true" lang="fr"></div>
         <div class="editeur-actions">
           <button type="button" id="btn-appliquer-texte">Appliquer les modifications</button>
           <button type="button" id="btn-restaurer-texte" class="secondary">Revenir au texte d'origine</button>
@@ -4245,6 +4272,28 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
     return anyText;
   }
 
+  // Alignement d'une ligne dans `avail` (editeur de texte) : centre / droite
+  // = decalage de la ligne ; justifie = chaque blanc de la ligne s'elargit
+  // d'autant (jamais sur la derniere ligne du paragraphe, comme un
+  // traitement de texte). Rend { dx, segments }.
+  function alignLine(line, align, avail, isLastLine, measure) {
+    const slack = avail - line.width;
+    if (align === 'center') return { dx: Math.max(0, slack / 2), segments: line.segments };
+    if (align === 'right') return { dx: Math.max(0, slack), segments: line.segments };
+    if (align !== 'justify' || isLastLine || slack <= 0.01) return { dx: 0, segments: line.segments };
+    const gaps = line.segments.reduce((n, s) => n + (s.text.match(/ /g) || []).length, 0);
+    if (!gaps) return { dx: 0, segments: line.segments };
+    const extra = slack / gaps;
+    const out = [];
+    for (const seg of line.segments) {
+      for (const part of seg.text.split(/( +)/).filter((p) => p !== '')) {
+        const isGap = /^ +$/.test(part);
+        out.push({ ...seg, text: part, width: measure(part, seg.style) + (isGap ? extra * part.length : 0), gap: isGap || undefined });
+      }
+    }
+    return { dx: 0, segments: out };
+  }
+
   // Reflow les runs d'une liste de blocs dans une largeur donnee, retourne
   // des lignes au meme format que computeLayout ({y relatif, x relatif,
   // segments, sizePt, isHeading, isListItem}) plus la hauteur totale.
@@ -4307,14 +4356,18 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
         continue;
       }
       const isHeading = block.type === 'h1' || block.type === 'h2' || block.type === 'h3';
-      const isListItem = block.type === 'li';
+      // `markerText` (editeur de texte) : '' = pas de puce, sinon le
+      // marqueur choisi (• – 1.) ; absent = comportement d'origine.
+      const marker = block.markerText !== undefined ? block.markerText : (block.type === 'li' ? '•' : '');
+      const isListItem = marker !== '';
       const sizePt = isHeading ? bodySize * HEADING_FACTORS[block.type] : bodySize;
       const lineGap = isHeading ? sizePt * settings.lineHeight : bodyLineGap;
       let runs = runsForDisplay(block.runs, settings);
       let indent = 0;
       if (isListItem) {
         indent = sizePt * 1.2;
-        runs = [{ text: '•  ', bold: false, italic: false }, ...runs];
+        if (marker.length > 1) indent = Math.max(indent, measurer.widthOf(marker + '  ', sizePt, 'normal'));
+        runs = [{ text: marker + '  ', bold: false, italic: false }, ...runs];
       }
       let iconBottom = null;
       if (pendingIcon) {
@@ -4338,8 +4391,12 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
       // `avgCharsPerLine` (ne doit compter que les lignes de retour
       // automatique) et au harnais visuel, qui doit appliquer exactement la
       // meme definition sur le DOM rendu (cf. visual.mjs).
+      const align = block.align || 'left';
       wrapped.forEach((l, wi) => {
-        lines.push({ y: y + lineGap * 0.8, x: indent, segments: l.segments, sizePt, isHeading, isListItem, isLastLine: wi === wrapped.length - 1 });
+        const isLastLine = wi === wrapped.length - 1;
+        const placed = alignLine(l, align, width - indent, isLastLine,
+          (t, st) => applySpacingToWidth(measurer.widthOf(t, sizePt, st), t, settings));
+        lines.push({ y: y + lineGap * 0.8, x: indent + placed.dx, segments: placed.segments, sizePt, isHeading, isListItem, isLastLine });
         y += lineGap;
       });
       if (iconBottom !== null) y = Math.max(y, iconBottom);
@@ -4534,6 +4591,7 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
         // (pas seulement le sommet), necessaire au regroupement par bande
         // verticale de l'ordre de lecture, cf. plus bas.
         srcTopY: box.y1, srcBottomY: box.y0, srcLeftX: box.x0, srcCenterX: (box.x0 + box.x1) / 2,
+        srcBlocks: boxContents[bi],
         lines: lines.map((l) => ({ ...l, x: l.x + boxPadding })),
         // ADDENDUM 6, Z12, C1 : images de la boite, memes coordonnees
         // relatives + rembourrage que les lignes ci-dessus.
@@ -4665,6 +4723,7 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
         // srcBottomY/srcLeftX (ADDENDUM 6, Z12, A2) : cf. commentaire sur
         // l'item 'box' ci-dessus.
         srcTopY: table.y1, srcBottomY: table.y0, srcLeftX: table.x0, srcCenterX: (table.x0 + table.x1) / 2,
+        srcBlocks: grid.flat().flatMap((c) => c.blocks),
         headerRow,
         cellPadding: cp,
       };
@@ -4774,7 +4833,8 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
           const cap = reflowBlocksInWidth([{ type: 'h2', runs: [{ text: captionText, bold: true, color: titleBlock && titleBlock.runs[0] ? titleBlock.runs[0].color : null }] }],
             maxW, tSettings, measurer, 0);
           items.push({ kind: 'flow', x: MARGIN_MM * MM_TO_PT, y: 0, width: maxW, height: cap.height, lines: cap.lines,
-            srcTopY: table.y1, srcBottomY: table.y0, srcLeftX: order - 0.005, srcCenterX: (table.x0 + table.x1) / 2, landscapeGroup: groupId });
+            srcTopY: table.y1, srcBottomY: table.y0, srcLeftX: order - 0.005, srcCenterX: (table.x0 + table.x1) / 2, landscapeGroup: groupId,
+            srcBlocks: titleBlock ? [titleBlock] : [] });
         }
         const gi = buildTableItem(table, grid, cols, tSettings, maxW, true, true, g.rowsIdx);
         gi.srcLeftX = order;
@@ -4798,7 +4858,8 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
         const rect = toOutputRect(block.bbox, widthRatio, pageHeightSrc);
         items.push({ kind: 'image', x: margin, y: rect.y, width: usableWidth,
           height: usableWidth * (rect.height / rect.width), src: block.dataUrl,
-          srcTopY: block.bbox.y1, srcBottomY: block.bbox.y0, srcLeftX: block.bbox.x0, srcCenterX: (block.bbox.x0 + block.bbox.x1) / 2 });
+          srcTopY: block.bbox.y1, srcBottomY: block.bbox.y0, srcLeftX: block.bbox.x0, srcCenterX: (block.bbox.x0 + block.bbox.x1) / 2,
+          srcBlocks: [block] });
         continue;
       }
       const { lines, height } = reflowBlocksInWidth([block], usableWidth, settings, measurer, 0);
@@ -4815,6 +4876,7 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
         // partager une.
         srcTopY: block.bbox ? block.bbox.y1 : 0, srcBottomY: block.bbox ? block.bbox.y0 : 0, srcLeftX: 0,
         srcCenterX: block.bbox ? (block.bbox.x0 + block.bbox.x1) / 2 : undefined,
+        srcBlocks: [block],
       });
     }
 
@@ -4930,7 +4992,14 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
       }
     }
 
+    // Ordre de lecture reel des blocs de cette page source (celui des items
+    // ci-dessus, avant pagination) : l'editeur de texte (04b) le suit, pour
+    // que le texte propose a la relecture soit dans l'ordre de la feuille.
+    const blockOrder = [];
+    for (const it of orderedItems) if (it.srcBlocks) blockOrder.push(...it.srcBlocks);
+
     return {
+      blockOrder,
       pages: outPages.map((pageItems) => ({
         items: pageItems,
         // v0.3 (E4) : une page de tableau large est en A4 paysage, quel
@@ -5534,6 +5603,7 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
     const pageCount = extraction.pageSizes.length;
     const dims = pageDimsPt(settings.orientation);
     const pages = [];
+    const blockOrder = [];
     let totalCharSamples = 0, totalLineSamples = 0;
 
     for (let p = 0; p < pageCount; p++) {
@@ -5543,8 +5613,9 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
       // ADDENDUM 6, Z9 : computeBlockLayout() pagine desormais lui-meme
       // (une page source peut produire plusieurs pages de sortie A4) --
       // on aplatit son resultat dans la liste globale de pages du document.
-      const { pages: sourcePageOutputs } = computeBlockLayout(pageBlocks, pageShapesForPage, pageSizeForPage, settings, measurer);
+      const { pages: sourcePageOutputs, blockOrder: pageOrder } = computeBlockLayout(pageBlocks, pageShapesForPage, pageSizeForPage, settings, measurer);
       pages.push(...sourcePageOutputs);
+      blockOrder.push(...pageOrder);
 
       // Flux libre ET boites (pleine largeur de page depuis A1, Z12) sont
       // pertinents pour l'avertissement "lignes trop courtes" -- SEULES les
@@ -5575,6 +5646,7 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
 
     return {
       pages,
+      blockOrder,
       settings,
       theme: CONTRAST_THEMES[settings.contrast],
       avgCharsPerLine,
@@ -5853,8 +5925,78 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
     return blockText(b).length > 0;
   }
 
-  function visibleBlocks(blocks, settings) {
-    return blocks.filter((b) => isEditable(b, settings));
+  // `order` (facultatif) : les blocs dans l'ORDRE DE LECTURE de la mise en
+  // page (layout.blockOrder). L'ordre du tableau `blocks` est celui de
+  // l'extraction, pas celui de la feuille (encadres, tableaux, colonnes) :
+  // sans `order`, le texte propose a la relecture pouvait presenter les
+  // phrases dans le desordre (retour de la prof : l'exercice 2 avant
+  // l'exercice 1). Un bloc absent de `order` reste colle a son predecesseur.
+  function visibleBlocks(blocks, settings, order) {
+    const vis = blocks.filter((b) => isEditable(b, settings));
+    if (!order || !order.length) return vis;
+    const rank = new Map();
+    order.forEach((b, k) => { if (!rank.has(b)) rank.set(b, k); });
+    let last = -1;
+    const keyed = vis.map((b, idx) => {
+      const k = rank.has(b) ? rank.get(b) : last + 0.5;
+      last = rank.has(b) ? k : last;
+      return { b, k, idx };
+    });
+    keyed.sort((x, y) => (x.k - y.k) || (x.idx - y.idx));
+    return keyed.map((x) => x.b);
+  }
+
+  // --- Mise en forme d'un paragraphe : alignement et puces -----------------
+  // Un paragraphe de l'editeur = { text, align, marker } avec
+  //   align  : 'left' | 'center' | 'right' | 'justify'
+  //   marker : 'none' | 'bullet' | 'dash' | 'number'
+  const ALIGNS = ['left', 'center', 'right', 'justify'];
+  const MARKERS = ['none', 'bullet', 'dash', 'number'];
+
+  function markerLabel(kind, n) {
+    if (kind === 'bullet') return '•';
+    if (kind === 'dash') return '–';
+    if (kind === 'number') return (n || 1) + '.';
+    return '';
+  }
+  // Marqueur actuellement rendu pour un bloc (cf. reflowBlocksInWidth).
+  function blockMarker(b) {
+    return b.markerText !== undefined ? b.markerText : (b.type === 'li' ? '•' : '');
+  }
+  function markerKind(b) {
+    const m = blockMarker(b);
+    if (m === '') return 'none';
+    if (m === '–') return 'dash';
+    if (/^\d+\.$/.test(m)) return 'number';
+    return 'bullet';
+  }
+  function blockParagraph(b) {
+    return { text: blockText(b), align: b.align || 'left', marker: markerKind(b) };
+  }
+  function normParagraph(p) {
+    const o = typeof p === 'string' ? { text: p } : p;
+    return {
+      text: o.text,
+      align: ALIGNS.includes(o.align) ? o.align : undefined,
+      marker: MARKERS.includes(o.marker) ? o.marker : undefined,
+    };
+  }
+  // Numero de chaque paragraphe a puce numerotee : 1, 2, 3... ; une
+  // interruption (autre paragraphe) relance la numerotation.
+  function numberParagraphs(paras) {
+    let n = 0;
+    return paras.map((p) => (p.marker === 'number' ? ++n : (n = 0)));
+  }
+  // Applique la mise en forme du paragraphe au bloc ; rend le MEME objet si
+  // rien ne change, sinon une copie.
+  function formatBlock(b, para, n) {
+    let out = b;
+    if (para.align && para.align !== (b.align || 'left')) out = { ...out, align: para.align, edited: true };
+    if (para.marker) {
+      const wanted = markerLabel(para.marker, n);
+      if (wanted !== blockMarker(b)) out = { ...out, markerText: wanted, edited: true };
+    }
+    return out;
   }
 
   // Paragraphes <-> texte : un paragraphe = un bloc de texte separe du
@@ -6023,20 +6165,31 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
 
   // Applique les paragraphes edites au modele de blocs (mode « blocs »).
   // `blocks` : tous les blocs (visibles ou non) ; rend un NOUVEAU tableau.
-  function applyEdit(blocks, editedParagraphs, settings) {
-    const visible = visibleBlocks(blocks, settings);
+  // `editedParagraphs` : textes ou { text, align, marker } ; `order` : ordre
+  // de lecture de la mise en page (cf. visibleBlocks), le MEME que celui du
+  // texte propose a la relecture.
+  function applyEdit(blocks, editedParagraphs, settings, order) {
+    const paras = editedParagraphs.map(normParagraph);
+    const nums = numberParagraphs(paras);
+    const editedTexts = paras.map((p) => p.text);
+    const visible = visibleBlocks(blocks, settings, order);
     const orig = visible.map(blockText);
-    const ops = alignParagraphs(orig, editedParagraphs);
+    const ops = alignParagraphs(orig, editedTexts);
 
-    const decision = new Map();  // bloc visible -> { drop } | { runs }
+    const decision = new Map();  // bloc visible -> { drop } | { runs, para, n }
     const addAfter = new Map();  // bloc visible -> [textes ajoutes juste apres lui]
     const addBefore = [];        // textes ajoutes avant le premier bloc visible
     let lastVisible = null;
     for (const o of ops) {
-      if (o.op === 'keep') { lastVisible = visible[o.i]; continue; }
+      if (o.op === 'keep') {
+        const b = visible[o.i];
+        decision.set(b, { para: paras[o.j], n: nums[o.j] });
+        lastVisible = b;
+        continue;
+      }
       if (o.op === 'edit') {
         const b = visible[o.i];
-        decision.set(b, { runs: applyTextToRuns(b.runs, editedParagraphs[o.j]) });
+        decision.set(b, { runs: applyTextToRuns(b.runs, editedTexts[o.j]), para: paras[o.j], n: nums[o.j] });
         lastVisible = b;
       } else if (o.op === 'del') {
         decision.set(visible[o.i], { drop: true });
@@ -6044,20 +6197,21 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
       } else if (o.op === 'add') {
         if (lastVisible) {
           if (!addAfter.has(lastVisible)) addAfter.set(lastVisible, []);
-          addAfter.get(lastVisible).push(editedParagraphs[o.j]);
-        } else addBefore.push(editedParagraphs[o.j]);
+          addAfter.get(lastVisible).push(o.j);
+        } else addBefore.push(o.j);
       }
     }
 
     // Un paragraphe ajoute copie la place (page, conteneur) du bloc voisin,
     // en texte courant (pas en titre).
-    const cloneFor = (model, text) => {
+    const cloneFor = (model, j) => {
       const firstRun = (model.runs && model.runs[0]) || {};
-      return {
+      const base = {
         type: model.type === 'li' ? 'li' : 'p', srcPage: model.srcPage, bbox: model.bbox, size: model.size,
         srcType: model.srcType, added: true,
-        runs: [{ ...firstRun, text, bold: false, underline: false }],
+        runs: [{ ...firstRun, text: paras[j].text, bold: false, underline: false }],
       };
+      return formatBlock(base, paras[j], nums[j]);
     };
     const firstVisible = visible[0];
     const out = [];
@@ -6070,7 +6224,9 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
         for (const t of addAfter.get(b) || []) out.push(cloneFor(b, t));
         continue;
       }
-      out.push(d && d.runs ? { ...b, runs: d.runs, edited: true } : b);
+      let nb = d && d.runs ? { ...b, runs: d.runs, edited: true } : b;
+      if (d && d.para) nb = formatBlock(nb, d.para, d.n);
+      out.push(nb);
       for (const t of addAfter.get(b) || []) out.push(cloneFor(b, t));
     }
     return out;
@@ -6081,14 +6237,16 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
   // Document de paragraphes simples, une seule « page source » qui se pagine
   // en A4 (comme n'importe quelle page trop haute). Les blocs sont ordonnes
   // par une ordonnee source decroissante, sans chevauchement vertical.
-  function plainDocument(text) {
-    const paragraphs = parseParagraphs(text);
+  // `source` : texte brut, ou liste de paragraphes { text, align, marker }.
+  function plainDocument(source) {
+    const paras = (Array.isArray(source) ? source : parseParagraphs(source)).map(normParagraph);
+    const nums = numberParagraphs(paras);
     const TOP = 1e6, STEP = 40;
-    const blocks = paragraphs.map((t, k) => ({
+    const blocks = paras.map((para, k) => formatBlock({
       type: 'p', srcPage: 1, plain: true,
-      runs: [{ text: t }],
+      runs: [{ text: para.text }],
       bbox: { x0: 0, x1: A4_PT.width, y0: TOP - k * STEP - 20, y1: TOP - k * STEP },
-    }));
+    }, para, nums[k]));
     const extraction = {
       blocks,
       pageShapes: [{ boxes: [], lines: [], decorative: [] }],
@@ -6101,6 +6259,9 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
     blockText,
     isEditable,
     visibleBlocks,
+    blockParagraph,
+    numberParagraphs,
+    markerLabel,
     joinParagraphs,
     parseParagraphs,
     alignParagraphs,
@@ -6135,9 +6296,11 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
 
   let masterBlocks = null; // tous les blocs extraits (avant filtrage pages de garde), jamais modifies
   let workingBlocks = null; // masterBlocks apres les corrections de texte (mode « blocs », 04b-text-edit.js)
-  let plainText = null; // non nul : le document est reconstruit depuis ce texte brut (mode « texte simple »)
+  let plainText = null; // non nul : liste de paragraphes { text, align, marker } dont le document est reconstruit (mode « texte simple »)
   let editorOpen = false;
-  let editorSnapshot = null; // { mode, text } au moment du remplissage du panneau : detecte les modifications non appliquees
+  let editorSnapshot = null; // { mode, text } au moment du remplissage du panneau : detecte les modifications non appliquees (text = paragraphes serialises)
+  let editorOrder = null; // ordre de lecture des blocs au moment du remplissage du panneau (layout.blockOrder)
+  let editorLastRange = null; // derniere selection dans l'editeur (les boutons de la barre d'outils la reprennent)
   let masterExtraction = null; // pageShapes/pageSizes de l'extraction (ADDENDUM 6, Z4.4 : moteur par blocs)
   let currentBlocks = null; // blocs effectivement utilises pour la mise en page (apres filtrage)
   let currentLayout = null;
@@ -6334,6 +6497,12 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
         if (deco) span.style.textDecoration = deco;
         span.style.color = rgbCss(window.LayoutEngine.resolveTextColor(seg.color, settings, theme, bg));
         span.textContent = seg.text;
+        // Blanc elargi d'une ligne justifiee : largeur imposee, comme dans l'export.
+        if (seg.gap) {
+          span.style.display = 'inline-block';
+          span.style.whiteSpace = 'pre';
+          span.style.width = (seg.width * scale) + 'px';
+        }
         lineDiv.appendChild(span);
       }
       container.appendChild(lineDiv);
@@ -6511,6 +6680,7 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
       extraction = masterExtraction;
     }
     currentBlocks = blocks;
+    els.editeurTexte.style.setProperty('--editeur-interligne', String(Math.max(1.5, Number(settings.lineHeight) || 1.5)));
     currentLayout = window.LayoutEngine.computeBlockLayoutForDocument(extraction, currentBlocks, settings, measurer);
     window.__DEBUG_LAYOUT__ = currentLayout; // diagnostic (tests/verify.sh) -- inoffensif
     clearMessages();
@@ -6529,20 +6699,119 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
 
   function editorStatus(text) { els.editeurEtat.textContent = text || ''; }
 
-  // Remplit le panneau avec le texte actuellement affiche.
+  // --- Editeur : un <p> par paragraphe, avec son alignement et sa puce ----
+  // (data-align, data-marker ; data-label = puce/numero affiche par le CSS).
+
+  function paragraphLabel(kind, n) { return window.TextEdit.markerLabel(kind, n); }
+
+  function refreshEditorLabels() {
+    const ps = [...els.editeurTexte.querySelectorAll('p')];
+    const nums = window.TextEdit.numberParagraphs(ps.map((p) => ({ marker: p.dataset.marker || 'none' })));
+    ps.forEach((p, k) => {
+      const kind = p.dataset.marker || 'none';
+      if (kind === 'none') p.removeAttribute('data-label');
+      else p.dataset.label = paragraphLabel(kind, nums[k]);
+      if (!p.dataset.align) p.dataset.align = 'left';
+    });
+  }
+
+  function setEditorParagraphs(paras) {
+    els.editeurTexte.textContent = '';
+    (paras.length ? paras : [{ text: '', align: 'left', marker: 'none' }]).forEach((para) => {
+      const p = document.createElement('p');
+      p.dataset.align = para.align || 'left';
+      p.dataset.marker = para.marker || 'none';
+      p.textContent = para.text;
+      els.editeurTexte.appendChild(p);
+    });
+    refreshEditorLabels();
+  }
+
+  // Normalise le contenu editable : tout texte ou element de premier niveau
+  // devient un <p> (Entree, collage ou suppression totale selon le navigateur).
+  function normalizeEditor() {
+    const root = els.editeurTexte;
+    for (const node of [...root.childNodes]) {
+      if (node.nodeType === 3 || (node.nodeType === 1 && node.tagName !== 'P')) {
+        const p = document.createElement('p');
+        root.insertBefore(p, node);
+        if (node.nodeType === 1 && node.tagName === 'DIV') { while (node.firstChild) p.appendChild(node.firstChild); node.remove(); }
+        else p.appendChild(node);
+      }
+    }
+    if (!root.querySelector('p')) setEditorParagraphs([]);
+    refreshEditorLabels();
+  }
+
+  function getEditorParagraphs() {
+    return [...els.editeurTexte.querySelectorAll('p')]
+      .map((p) => ({
+        text: p.textContent.replace(/\s+/g, ' ').trim(),
+        align: p.dataset.align || 'left',
+        marker: p.dataset.marker || 'none',
+      }))
+      .filter((p) => p.text.length > 0);
+  }
+
+  function serializeParagraphs(paras) {
+    return JSON.stringify(paras.map((p) => [p.text, p.align, p.marker]));
+  }
+
+  function selectedEditorParagraphs() {
+    const root = els.editeurTexte;
+    const sel = window.getSelection();
+    let range = sel && sel.rangeCount && root.contains(sel.anchorNode) ? sel.getRangeAt(0) : editorLastRange;
+    const ps = [...root.querySelectorAll('p')];
+    if (!range) return ps.length ? [ps[0]] : [];
+    const within = (p) => range.intersectsNode(p);
+    const hit = ps.filter(within);
+    return hit.length ? hit : (ps.length ? [ps[0]] : []);
+  }
+
+  function updateToolbarState() {
+    const sel = selectedEditorParagraphs();
+    const aligns = new Set(sel.map((p) => p.dataset.align || 'left'));
+    const markers = new Set(sel.map((p) => p.dataset.marker || 'none'));
+    els.editeurBarre.querySelectorAll('button[data-align]').forEach((b) => {
+      b.setAttribute('aria-pressed', aligns.size === 1 && aligns.has(b.dataset.align) ? 'true' : 'false');
+    });
+    els.editeurBarre.querySelectorAll('button[data-marker]').forEach((b) => {
+      b.setAttribute('aria-pressed', markers.size === 1 && markers.has(b.dataset.marker) ? 'true' : 'false');
+    });
+  }
+
+  function applyToolbar(button) {
+    const sel = selectedEditorParagraphs();
+    if (!sel.length) return;
+    if (button.dataset.align) {
+      sel.forEach((p) => { p.dataset.align = button.dataset.align; });
+    } else if (button.dataset.marker) {
+      // Meme bouton une seconde fois : retire la puce (comme dans Word).
+      const kind = sel.every((p) => p.dataset.marker === button.dataset.marker) ? 'none' : button.dataset.marker;
+      sel.forEach((p) => { p.dataset.marker = kind; });
+    }
+    refreshEditorLabels();
+    updateToolbarState();
+    editorStatus('');
+  }
+
+  // Remplit le panneau avec le texte actuellement affiche, dans l'ordre de
+  // lecture de la mise en page.
   function fillEditor(settings) {
     settings = settings || readSettingsFromUI();
-    let text;
+    let paras;
     if (editorMode() === 'brut' && plainText !== null) {
-      text = plainText;
+      paras = plainText;
     } else {
-      const visible = window.TextEdit.visibleBlocks(workingBlocks, settings);
-      text = window.TextEdit.joinParagraphs(visible.map(window.TextEdit.blockText));
+      editorOrder = currentLayout ? currentLayout.blockOrder : null;
+      const visible = window.TextEdit.visibleBlocks(workingBlocks, settings, editorOrder);
+      paras = visible.map(window.TextEdit.blockParagraph);
     }
-    els.editeurTexte.value = text;
-    editorSnapshot = { mode: editorMode(), text };
-    const n = window.TextEdit.parseParagraphs(text).length;
+    setEditorParagraphs(paras);
+    editorSnapshot = { mode: editorMode(), text: serializeParagraphs(getEditorParagraphs()) };
+    const n = getEditorParagraphs().length;
     editorStatus(n + ' paragraphe' + (n > 1 ? 's' : '') + (plainText !== null ? ' — texte simple' : (isTextEdited() ? ' — texte modifié' : '')));
+    updateToolbarState();
   }
 
   function isTextEdited() {
@@ -6550,20 +6819,20 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
   }
 
   function editorIsDirty() {
-    return !!editorSnapshot && els.editeurTexte.value !== editorSnapshot.text;
+    return !!editorSnapshot && serializeParagraphs(getEditorParagraphs()) !== editorSnapshot.text;
   }
 
   // Reporte le texte du panneau sur le document.
   function commitEditor(settings) {
     settings = settings || readSettingsFromUI();
-    const text = els.editeurTexte.value;
+    const paras = getEditorParagraphs();
     if (editorMode() === 'brut') {
-      plainText = text;
+      plainText = paras;
     } else {
       plainText = null;
-      workingBlocks = window.TextEdit.applyEdit(workingBlocks, window.TextEdit.parseParagraphs(text), settings);
+      workingBlocks = window.TextEdit.applyEdit(workingBlocks, paras, settings, editorOrder);
     }
-    editorSnapshot = { mode: editorMode(), text };
+    editorSnapshot = { mode: editorMode(), text: serializeParagraphs(paras) };
   }
 
   function openEditor(open) {
@@ -6614,13 +6883,38 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
           fillEditor();
           if (dirty) editorStatus('Modifications non appliquées abandonnées.');
         } else {
-          editorSnapshot = { mode: 'brut', text: els.editeurTexte.value };
+          editorSnapshot = { mode: 'brut', text: serializeParagraphs(getEditorParagraphs()) };
           editorStatus('Après « Appliquer », le document ne gardera que ce texte.');
         }
       });
     });
     els.editeurTexte.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); els.btnAppliquerTexte.click(); }
+    });
+    try { document.execCommand('defaultParagraphSeparator', false, 'p'); } catch (e) { /* sans effet */ }
+    els.editeurTexte.addEventListener('input', normalizeEditor);
+    // Collage : texte seul, un paragraphe par ligne vide ou par retour a la ligne.
+    els.editeurTexte.addEventListener('paste', (e) => {
+      e.preventDefault();
+      const text = ((e.clipboardData || window.clipboardData).getData('text/plain') || '').replace(/\r\n?/g, '\n');
+      const parts = text.split(/\n+/);
+      parts.forEach((part, k) => {
+        if (k > 0) document.execCommand('insertParagraph');
+        if (part) document.execCommand('insertText', false, part);
+      });
+    });
+    document.addEventListener('selectionchange', () => {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount && els.editeurTexte.contains(sel.anchorNode)) {
+        editorLastRange = sel.getRangeAt(0).cloneRange();
+        updateToolbarState();
+      }
+    });
+    // Les boutons ne prennent pas le focus a la souris : la selection reste dans l'editeur.
+    els.editeurBarre.addEventListener('mousedown', (e) => { if (e.target.closest('button')) e.preventDefault(); });
+    els.editeurBarre.addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (btn) applyToolbar(btn);
     });
   }
   async function handleDownload() {
@@ -6882,6 +7176,7 @@ window.ASSETS = {"pdfjsLib":"LyoqCiAqIEBsaWNzdGFydCBUaGUgZm9sbG93aW5nIGlzIHRoZSB
     els.editeurModeBlocs = q('editeur-mode-blocs');
     els.editeurModeBrut = q('editeur-mode-brut');
     els.editeurTexte = q('editeur-texte');
+    els.editeurBarre = q('editeur-barre');
     els.editeurEtat = q('editeur-etat');
     els.btnAppliquerTexte = q('btn-appliquer-texte');
     els.btnRestaurerTexte = q('btn-restaurer-texte');

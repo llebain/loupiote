@@ -21,9 +21,11 @@
 
   let masterBlocks = null; // tous les blocs extraits (avant filtrage pages de garde), jamais modifies
   let workingBlocks = null; // masterBlocks apres les corrections de texte (mode « blocs », 04b-text-edit.js)
-  let plainText = null; // non nul : le document est reconstruit depuis ce texte brut (mode « texte simple »)
+  let plainText = null; // non nul : liste de paragraphes { text, align, marker } dont le document est reconstruit (mode « texte simple »)
   let editorOpen = false;
-  let editorSnapshot = null; // { mode, text } au moment du remplissage du panneau : detecte les modifications non appliquees
+  let editorSnapshot = null; // { mode, text } au moment du remplissage du panneau : detecte les modifications non appliquees (text = paragraphes serialises)
+  let editorOrder = null; // ordre de lecture des blocs au moment du remplissage du panneau (layout.blockOrder)
+  let editorLastRange = null; // derniere selection dans l'editeur (les boutons de la barre d'outils la reprennent)
   let masterExtraction = null; // pageShapes/pageSizes de l'extraction (ADDENDUM 6, Z4.4 : moteur par blocs)
   let currentBlocks = null; // blocs effectivement utilises pour la mise en page (apres filtrage)
   let currentLayout = null;
@@ -220,6 +222,12 @@
         if (deco) span.style.textDecoration = deco;
         span.style.color = rgbCss(window.LayoutEngine.resolveTextColor(seg.color, settings, theme, bg));
         span.textContent = seg.text;
+        // Blanc elargi d'une ligne justifiee : largeur imposee, comme dans l'export.
+        if (seg.gap) {
+          span.style.display = 'inline-block';
+          span.style.whiteSpace = 'pre';
+          span.style.width = (seg.width * scale) + 'px';
+        }
         lineDiv.appendChild(span);
       }
       container.appendChild(lineDiv);
@@ -397,6 +405,7 @@
       extraction = masterExtraction;
     }
     currentBlocks = blocks;
+    els.editeurTexte.style.setProperty('--editeur-interligne', String(Math.max(1.5, Number(settings.lineHeight) || 1.5)));
     currentLayout = window.LayoutEngine.computeBlockLayoutForDocument(extraction, currentBlocks, settings, measurer);
     window.__DEBUG_LAYOUT__ = currentLayout; // diagnostic (tests/verify.sh) -- inoffensif
     clearMessages();
@@ -415,20 +424,119 @@
 
   function editorStatus(text) { els.editeurEtat.textContent = text || ''; }
 
-  // Remplit le panneau avec le texte actuellement affiche.
+  // --- Editeur : un <p> par paragraphe, avec son alignement et sa puce ----
+  // (data-align, data-marker ; data-label = puce/numero affiche par le CSS).
+
+  function paragraphLabel(kind, n) { return window.TextEdit.markerLabel(kind, n); }
+
+  function refreshEditorLabels() {
+    const ps = [...els.editeurTexte.querySelectorAll('p')];
+    const nums = window.TextEdit.numberParagraphs(ps.map((p) => ({ marker: p.dataset.marker || 'none' })));
+    ps.forEach((p, k) => {
+      const kind = p.dataset.marker || 'none';
+      if (kind === 'none') p.removeAttribute('data-label');
+      else p.dataset.label = paragraphLabel(kind, nums[k]);
+      if (!p.dataset.align) p.dataset.align = 'left';
+    });
+  }
+
+  function setEditorParagraphs(paras) {
+    els.editeurTexte.textContent = '';
+    (paras.length ? paras : [{ text: '', align: 'left', marker: 'none' }]).forEach((para) => {
+      const p = document.createElement('p');
+      p.dataset.align = para.align || 'left';
+      p.dataset.marker = para.marker || 'none';
+      p.textContent = para.text;
+      els.editeurTexte.appendChild(p);
+    });
+    refreshEditorLabels();
+  }
+
+  // Normalise le contenu editable : tout texte ou element de premier niveau
+  // devient un <p> (Entree, collage ou suppression totale selon le navigateur).
+  function normalizeEditor() {
+    const root = els.editeurTexte;
+    for (const node of [...root.childNodes]) {
+      if (node.nodeType === 3 || (node.nodeType === 1 && node.tagName !== 'P')) {
+        const p = document.createElement('p');
+        root.insertBefore(p, node);
+        if (node.nodeType === 1 && node.tagName === 'DIV') { while (node.firstChild) p.appendChild(node.firstChild); node.remove(); }
+        else p.appendChild(node);
+      }
+    }
+    if (!root.querySelector('p')) setEditorParagraphs([]);
+    refreshEditorLabels();
+  }
+
+  function getEditorParagraphs() {
+    return [...els.editeurTexte.querySelectorAll('p')]
+      .map((p) => ({
+        text: p.textContent.replace(/\s+/g, ' ').trim(),
+        align: p.dataset.align || 'left',
+        marker: p.dataset.marker || 'none',
+      }))
+      .filter((p) => p.text.length > 0);
+  }
+
+  function serializeParagraphs(paras) {
+    return JSON.stringify(paras.map((p) => [p.text, p.align, p.marker]));
+  }
+
+  function selectedEditorParagraphs() {
+    const root = els.editeurTexte;
+    const sel = window.getSelection();
+    let range = sel && sel.rangeCount && root.contains(sel.anchorNode) ? sel.getRangeAt(0) : editorLastRange;
+    const ps = [...root.querySelectorAll('p')];
+    if (!range) return ps.length ? [ps[0]] : [];
+    const within = (p) => range.intersectsNode(p);
+    const hit = ps.filter(within);
+    return hit.length ? hit : (ps.length ? [ps[0]] : []);
+  }
+
+  function updateToolbarState() {
+    const sel = selectedEditorParagraphs();
+    const aligns = new Set(sel.map((p) => p.dataset.align || 'left'));
+    const markers = new Set(sel.map((p) => p.dataset.marker || 'none'));
+    els.editeurBarre.querySelectorAll('button[data-align]').forEach((b) => {
+      b.setAttribute('aria-pressed', aligns.size === 1 && aligns.has(b.dataset.align) ? 'true' : 'false');
+    });
+    els.editeurBarre.querySelectorAll('button[data-marker]').forEach((b) => {
+      b.setAttribute('aria-pressed', markers.size === 1 && markers.has(b.dataset.marker) ? 'true' : 'false');
+    });
+  }
+
+  function applyToolbar(button) {
+    const sel = selectedEditorParagraphs();
+    if (!sel.length) return;
+    if (button.dataset.align) {
+      sel.forEach((p) => { p.dataset.align = button.dataset.align; });
+    } else if (button.dataset.marker) {
+      // Meme bouton une seconde fois : retire la puce (comme dans Word).
+      const kind = sel.every((p) => p.dataset.marker === button.dataset.marker) ? 'none' : button.dataset.marker;
+      sel.forEach((p) => { p.dataset.marker = kind; });
+    }
+    refreshEditorLabels();
+    updateToolbarState();
+    editorStatus('');
+  }
+
+  // Remplit le panneau avec le texte actuellement affiche, dans l'ordre de
+  // lecture de la mise en page.
   function fillEditor(settings) {
     settings = settings || readSettingsFromUI();
-    let text;
+    let paras;
     if (editorMode() === 'brut' && plainText !== null) {
-      text = plainText;
+      paras = plainText;
     } else {
-      const visible = window.TextEdit.visibleBlocks(workingBlocks, settings);
-      text = window.TextEdit.joinParagraphs(visible.map(window.TextEdit.blockText));
+      editorOrder = currentLayout ? currentLayout.blockOrder : null;
+      const visible = window.TextEdit.visibleBlocks(workingBlocks, settings, editorOrder);
+      paras = visible.map(window.TextEdit.blockParagraph);
     }
-    els.editeurTexte.value = text;
-    editorSnapshot = { mode: editorMode(), text };
-    const n = window.TextEdit.parseParagraphs(text).length;
+    setEditorParagraphs(paras);
+    editorSnapshot = { mode: editorMode(), text: serializeParagraphs(getEditorParagraphs()) };
+    const n = getEditorParagraphs().length;
     editorStatus(n + ' paragraphe' + (n > 1 ? 's' : '') + (plainText !== null ? ' — texte simple' : (isTextEdited() ? ' — texte modifié' : '')));
+    updateToolbarState();
   }
 
   function isTextEdited() {
@@ -436,20 +544,20 @@
   }
 
   function editorIsDirty() {
-    return !!editorSnapshot && els.editeurTexte.value !== editorSnapshot.text;
+    return !!editorSnapshot && serializeParagraphs(getEditorParagraphs()) !== editorSnapshot.text;
   }
 
   // Reporte le texte du panneau sur le document.
   function commitEditor(settings) {
     settings = settings || readSettingsFromUI();
-    const text = els.editeurTexte.value;
+    const paras = getEditorParagraphs();
     if (editorMode() === 'brut') {
-      plainText = text;
+      plainText = paras;
     } else {
       plainText = null;
-      workingBlocks = window.TextEdit.applyEdit(workingBlocks, window.TextEdit.parseParagraphs(text), settings);
+      workingBlocks = window.TextEdit.applyEdit(workingBlocks, paras, settings, editorOrder);
     }
-    editorSnapshot = { mode: editorMode(), text };
+    editorSnapshot = { mode: editorMode(), text: serializeParagraphs(paras) };
   }
 
   function openEditor(open) {
@@ -500,13 +608,38 @@
           fillEditor();
           if (dirty) editorStatus('Modifications non appliquées abandonnées.');
         } else {
-          editorSnapshot = { mode: 'brut', text: els.editeurTexte.value };
+          editorSnapshot = { mode: 'brut', text: serializeParagraphs(getEditorParagraphs()) };
           editorStatus('Après « Appliquer », le document ne gardera que ce texte.');
         }
       });
     });
     els.editeurTexte.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); els.btnAppliquerTexte.click(); }
+    });
+    try { document.execCommand('defaultParagraphSeparator', false, 'p'); } catch (e) { /* sans effet */ }
+    els.editeurTexte.addEventListener('input', normalizeEditor);
+    // Collage : texte seul, un paragraphe par ligne vide ou par retour a la ligne.
+    els.editeurTexte.addEventListener('paste', (e) => {
+      e.preventDefault();
+      const text = ((e.clipboardData || window.clipboardData).getData('text/plain') || '').replace(/\r\n?/g, '\n');
+      const parts = text.split(/\n+/);
+      parts.forEach((part, k) => {
+        if (k > 0) document.execCommand('insertParagraph');
+        if (part) document.execCommand('insertText', false, part);
+      });
+    });
+    document.addEventListener('selectionchange', () => {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount && els.editeurTexte.contains(sel.anchorNode)) {
+        editorLastRange = sel.getRangeAt(0).cloneRange();
+        updateToolbarState();
+      }
+    });
+    // Les boutons ne prennent pas le focus a la souris : la selection reste dans l'editeur.
+    els.editeurBarre.addEventListener('mousedown', (e) => { if (e.target.closest('button')) e.preventDefault(); });
+    els.editeurBarre.addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (btn) applyToolbar(btn);
     });
   }
   async function handleDownload() {
@@ -768,6 +901,7 @@
     els.editeurModeBlocs = q('editeur-mode-blocs');
     els.editeurModeBrut = q('editeur-mode-brut');
     els.editeurTexte = q('editeur-texte');
+    els.editeurBarre = q('editeur-barre');
     els.editeurEtat = q('editeur-etat');
     els.btnAppliquerTexte = q('btn-appliquer-texte');
     els.btnRestaurerTexte = q('btn-restaurer-texte');

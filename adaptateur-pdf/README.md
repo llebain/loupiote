@@ -20,8 +20,10 @@ personnel) pour un enfant malvoyant.
    simplifié, en-têtes et numéros de page) dans le panneau latéral —
    l'aperçu se met à jour immédiatement.
 4. Au besoin, cliquer sur « Modifier le texte » : le texte du document
-   s'affiche à côté de l'aperçu, on y supprime une phrase en trop ou on
-   corrige une faute, puis « Appliquer les modifications ».
+   s'affiche à côté de l'aperçu, dans l'ordre de la feuille ; on y supprime une
+   phrase en trop ou on corrige une faute, on aligne un paragraphe (gauche,
+   centré, droite, justifié) et on lui ajoute une puce, un tiret ou un
+   numéro, puis « Appliquer les modifications ».
 5. Cliquer sur « Télécharger le PDF adapté », ou « Imprimer » en filet de
    sécurité.
 

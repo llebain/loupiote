@@ -131,7 +131,7 @@ __CSS__
     <div id="espace-travail">
       <section id="editeur" hidden aria-labelledby="editeur-titre">
         <h2 id="editeur-titre">Modifier le texte</h2>
-        <p>Supprimez les phrases en trop, corrigez les fautes : la mise en page est refaite à partir de ce texte. Séparez les paragraphes par une ligne vide.</p>
+        <p>Supprimez les phrases en trop, corrigez les fautes : la mise en page est refaite à partir de ce texte. Chaque paragraphe garde sa place dans l'ordre du document. Placez le curseur dans un paragraphe pour l'aligner (gauche, centré, droite, justifié) ou lui ajouter une puce, un tiret ou un numéro.</p>
         <fieldset id="editeur-mode">
           <legend>Après modification</legend>
           <p class="case-a-cocher">
@@ -143,8 +143,18 @@ __CSS__
             <label for="editeur-mode-brut">Texte simple seulement (plus de titres, de tableaux ni d'images)</label>
           </p>
         </fieldset>
-        <label for="editeur-texte">Texte du document</label>
-        <textarea id="editeur-texte" rows="14" spellcheck="true" lang="fr"></textarea>
+        <p id="editeur-texte-label" class="editeur-label">Texte du document</p>
+        <div id="editeur-barre" role="toolbar" aria-label="Mise en forme du paragraphe" aria-controls="editeur-texte">
+          <button type="button" data-align="left" title="Aligner à gauche" aria-label="Aligner à gauche">⇤ Gauche</button>
+          <button type="button" data-align="center" title="Centrer" aria-label="Centrer">↔ Centré</button>
+          <button type="button" data-align="right" title="Aligner à droite" aria-label="Aligner à droite">⇥ Droite</button>
+          <button type="button" data-align="justify" title="Justifier" aria-label="Justifier">☰ Justifié</button>
+          <span class="editeur-separateur" aria-hidden="true"></span>
+          <button type="button" data-marker="bullet" title="Liste à puces" aria-label="Liste à puces">• Puces</button>
+          <button type="button" data-marker="dash" title="Liste à tirets" aria-label="Liste à tirets">– Tirets</button>
+          <button type="button" data-marker="number" title="Liste numérotée" aria-label="Liste numérotée">1. Numéros</button>
+        </div>
+        <div id="editeur-texte" role="textbox" aria-multiline="true" aria-labelledby="editeur-texte-label" contenteditable="true" spellcheck="true" lang="fr"></div>
         <div class="editeur-actions">
           <button type="button" id="btn-appliquer-texte">Appliquer les modifications</button>
           <button type="button" id="btn-restaurer-texte" class="secondary">Revenir au texte d'origine</button>

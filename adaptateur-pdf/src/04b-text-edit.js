@@ -34,8 +34,78 @@
     return blockText(b).length > 0;
   }
 
-  function visibleBlocks(blocks, settings) {
-    return blocks.filter((b) => isEditable(b, settings));
+  // `order` (facultatif) : les blocs dans l'ORDRE DE LECTURE de la mise en
+  // page (layout.blockOrder). L'ordre du tableau `blocks` est celui de
+  // l'extraction, pas celui de la feuille (encadres, tableaux, colonnes) :
+  // sans `order`, le texte propose a la relecture pouvait presenter les
+  // phrases dans le desordre (retour de la prof : l'exercice 2 avant
+  // l'exercice 1). Un bloc absent de `order` reste colle a son predecesseur.
+  function visibleBlocks(blocks, settings, order) {
+    const vis = blocks.filter((b) => isEditable(b, settings));
+    if (!order || !order.length) return vis;
+    const rank = new Map();
+    order.forEach((b, k) => { if (!rank.has(b)) rank.set(b, k); });
+    let last = -1;
+    const keyed = vis.map((b, idx) => {
+      const k = rank.has(b) ? rank.get(b) : last + 0.5;
+      last = rank.has(b) ? k : last;
+      return { b, k, idx };
+    });
+    keyed.sort((x, y) => (x.k - y.k) || (x.idx - y.idx));
+    return keyed.map((x) => x.b);
+  }
+
+  // --- Mise en forme d'un paragraphe : alignement et puces -----------------
+  // Un paragraphe de l'editeur = { text, align, marker } avec
+  //   align  : 'left' | 'center' | 'right' | 'justify'
+  //   marker : 'none' | 'bullet' | 'dash' | 'number'
+  const ALIGNS = ['left', 'center', 'right', 'justify'];
+  const MARKERS = ['none', 'bullet', 'dash', 'number'];
+
+  function markerLabel(kind, n) {
+    if (kind === 'bullet') return '•';
+    if (kind === 'dash') return '–';
+    if (kind === 'number') return (n || 1) + '.';
+    return '';
+  }
+  // Marqueur actuellement rendu pour un bloc (cf. reflowBlocksInWidth).
+  function blockMarker(b) {
+    return b.markerText !== undefined ? b.markerText : (b.type === 'li' ? '•' : '');
+  }
+  function markerKind(b) {
+    const m = blockMarker(b);
+    if (m === '') return 'none';
+    if (m === '–') return 'dash';
+    if (/^\d+\.$/.test(m)) return 'number';
+    return 'bullet';
+  }
+  function blockParagraph(b) {
+    return { text: blockText(b), align: b.align || 'left', marker: markerKind(b) };
+  }
+  function normParagraph(p) {
+    const o = typeof p === 'string' ? { text: p } : p;
+    return {
+      text: o.text,
+      align: ALIGNS.includes(o.align) ? o.align : undefined,
+      marker: MARKERS.includes(o.marker) ? o.marker : undefined,
+    };
+  }
+  // Numero de chaque paragraphe a puce numerotee : 1, 2, 3... ; une
+  // interruption (autre paragraphe) relance la numerotation.
+  function numberParagraphs(paras) {
+    let n = 0;
+    return paras.map((p) => (p.marker === 'number' ? ++n : (n = 0)));
+  }
+  // Applique la mise en forme du paragraphe au bloc ; rend le MEME objet si
+  // rien ne change, sinon une copie.
+  function formatBlock(b, para, n) {
+    let out = b;
+    if (para.align && para.align !== (b.align || 'left')) out = { ...out, align: para.align, edited: true };
+    if (para.marker) {
+      const wanted = markerLabel(para.marker, n);
+      if (wanted !== blockMarker(b)) out = { ...out, markerText: wanted, edited: true };
+    }
+    return out;
   }
 
   // Paragraphes <-> texte : un paragraphe = un bloc de texte separe du
@@ -204,20 +274,31 @@
 
   // Applique les paragraphes edites au modele de blocs (mode « blocs »).
   // `blocks` : tous les blocs (visibles ou non) ; rend un NOUVEAU tableau.
-  function applyEdit(blocks, editedParagraphs, settings) {
-    const visible = visibleBlocks(blocks, settings);
+  // `editedParagraphs` : textes ou { text, align, marker } ; `order` : ordre
+  // de lecture de la mise en page (cf. visibleBlocks), le MEME que celui du
+  // texte propose a la relecture.
+  function applyEdit(blocks, editedParagraphs, settings, order) {
+    const paras = editedParagraphs.map(normParagraph);
+    const nums = numberParagraphs(paras);
+    const editedTexts = paras.map((p) => p.text);
+    const visible = visibleBlocks(blocks, settings, order);
     const orig = visible.map(blockText);
-    const ops = alignParagraphs(orig, editedParagraphs);
+    const ops = alignParagraphs(orig, editedTexts);
 
-    const decision = new Map();  // bloc visible -> { drop } | { runs }
+    const decision = new Map();  // bloc visible -> { drop } | { runs, para, n }
     const addAfter = new Map();  // bloc visible -> [textes ajoutes juste apres lui]
     const addBefore = [];        // textes ajoutes avant le premier bloc visible
     let lastVisible = null;
     for (const o of ops) {
-      if (o.op === 'keep') { lastVisible = visible[o.i]; continue; }
+      if (o.op === 'keep') {
+        const b = visible[o.i];
+        decision.set(b, { para: paras[o.j], n: nums[o.j] });
+        lastVisible = b;
+        continue;
+      }
       if (o.op === 'edit') {
         const b = visible[o.i];
-        decision.set(b, { runs: applyTextToRuns(b.runs, editedParagraphs[o.j]) });
+        decision.set(b, { runs: applyTextToRuns(b.runs, editedTexts[o.j]), para: paras[o.j], n: nums[o.j] });
         lastVisible = b;
       } else if (o.op === 'del') {
         decision.set(visible[o.i], { drop: true });
@@ -225,20 +306,21 @@
       } else if (o.op === 'add') {
         if (lastVisible) {
           if (!addAfter.has(lastVisible)) addAfter.set(lastVisible, []);
-          addAfter.get(lastVisible).push(editedParagraphs[o.j]);
-        } else addBefore.push(editedParagraphs[o.j]);
+          addAfter.get(lastVisible).push(o.j);
+        } else addBefore.push(o.j);
       }
     }
 
     // Un paragraphe ajoute copie la place (page, conteneur) du bloc voisin,
     // en texte courant (pas en titre).
-    const cloneFor = (model, text) => {
+    const cloneFor = (model, j) => {
       const firstRun = (model.runs && model.runs[0]) || {};
-      return {
+      const base = {
         type: model.type === 'li' ? 'li' : 'p', srcPage: model.srcPage, bbox: model.bbox, size: model.size,
         srcType: model.srcType, added: true,
-        runs: [{ ...firstRun, text, bold: false, underline: false }],
+        runs: [{ ...firstRun, text: paras[j].text, bold: false, underline: false }],
       };
+      return formatBlock(base, paras[j], nums[j]);
     };
     const firstVisible = visible[0];
     const out = [];
@@ -251,7 +333,9 @@
         for (const t of addAfter.get(b) || []) out.push(cloneFor(b, t));
         continue;
       }
-      out.push(d && d.runs ? { ...b, runs: d.runs, edited: true } : b);
+      let nb = d && d.runs ? { ...b, runs: d.runs, edited: true } : b;
+      if (d && d.para) nb = formatBlock(nb, d.para, d.n);
+      out.push(nb);
       for (const t of addAfter.get(b) || []) out.push(cloneFor(b, t));
     }
     return out;
@@ -262,14 +346,16 @@
   // Document de paragraphes simples, une seule « page source » qui se pagine
   // en A4 (comme n'importe quelle page trop haute). Les blocs sont ordonnes
   // par une ordonnee source decroissante, sans chevauchement vertical.
-  function plainDocument(text) {
-    const paragraphs = parseParagraphs(text);
+  // `source` : texte brut, ou liste de paragraphes { text, align, marker }.
+  function plainDocument(source) {
+    const paras = (Array.isArray(source) ? source : parseParagraphs(source)).map(normParagraph);
+    const nums = numberParagraphs(paras);
     const TOP = 1e6, STEP = 40;
-    const blocks = paragraphs.map((t, k) => ({
+    const blocks = paras.map((para, k) => formatBlock({
       type: 'p', srcPage: 1, plain: true,
-      runs: [{ text: t }],
+      runs: [{ text: para.text }],
       bbox: { x0: 0, x1: A4_PT.width, y0: TOP - k * STEP - 20, y1: TOP - k * STEP },
-    }));
+    }, para, nums[k]));
     const extraction = {
       blocks,
       pageShapes: [{ boxes: [], lines: [], decorative: [] }],
@@ -282,6 +368,9 @@
     blockText,
     isEditable,
     visibleBlocks,
+    blockParagraph,
+    numberParagraphs,
+    markerLabel,
     joinParagraphs,
     parseParagraphs,
     alignParagraphs,
