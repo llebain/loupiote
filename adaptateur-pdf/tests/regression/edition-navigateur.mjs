@@ -43,6 +43,20 @@ async function deposer(page, fixture) {
 const textePages = (page) => page.evaluate(() => [...document.querySelectorAll('.page-apercu .ligne')].map((l) => l.textContent).join('\n'));
 const nb = (page, sel) => page.evaluate((s) => document.querySelectorAll(s).length, sel);
 const attendreApercu = (page) => page.waitForTimeout(400);
+// Editeur de texte : un <p> par paragraphe (alignement / puce en data-*).
+const lireEditeur = (page) => page.evaluate(() => [...document.querySelectorAll('#editeur-texte p')].map((p) => p.textContent).filter((t) => t.trim()).join('\n\n'));
+const ecrireEditeur = (page, texte) => page.evaluate((t) => {
+  const ed = document.getElementById('editeur-texte');
+  ed.textContent = '';
+  for (const part of t.split(/\n\n/)) { const p = document.createElement('p'); p.dataset.align = 'left'; p.dataset.marker = 'none'; p.textContent = part; ed.appendChild(p); }
+  ed.dispatchEvent(new Event('input', { bubbles: true }));
+}, texte);
+const selectionnerParagraphe = (page, k) => page.evaluate((i) => {
+  const p = document.querySelectorAll('#editeur-texte p')[i];
+  const r = document.createRange(); r.selectNodeContents(p);
+  const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+  document.dispatchEvent(new Event('selectionchange'));
+}, k);
 
 async function main() {
   const launch = process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' };
@@ -124,14 +138,14 @@ async function main() {
       return a.left >= e.right - 1;
     });
     check('editeur/a-cote-de-l-apercu', aCote, 'le panneau n\'est pas a cote de l\'apercu');
-    const texte = await page.inputValue('#editeur-texte');
+    const texte = await lireEditeur(page);
     const paragraphes = texte.split(/\n\n/);
     check('editeur/texte-extrait', paragraphes.length > 4 && paragraphes.every((p) => p.trim()), `${paragraphes.length} paragraphe(s)`);
     check('editeur/meme-texte-que-l-apercu', paragraphes.every((p) => avant.replace(/\s+/g, ' ').includes(p.slice(0, 20))), 'le panneau montre un texte different de l\'apercu');
 
     // Suppression d'une phrase en trop.
     const cible = paragraphes[2];
-    await page.fill('#editeur-texte', paragraphes.filter((_, i) => i !== 2).join('\n\n'));
+    await ecrireEditeur(page, paragraphes.filter((_, i) => i !== 2).join('\n\n'));
     await page.click('#btn-appliquer-texte');
     await attendreApercu(page);
     let apres = (await textePages(page)).replace(/\s+/g, ' ');
@@ -141,8 +155,8 @@ async function main() {
 
     // Correction d'un mot, puis changement de reglage SANS appliquer : la
     // saisie n'est pas perdue.
-    const t2 = await page.inputValue('#editeur-texte');
-    await page.fill('#editeur-texte', t2.replace(/^(\S+)/, 'CORRIGE'));
+    const t2 = await lireEditeur(page);
+    await ecrireEditeur(page, t2.replace(/^(\S+)/, 'CORRIGE'));
     await page.selectOption('#reglage-interligne', '1.75');
     await attendreApercu(page);
     check('editeur/saisie-conservee-au-changement-de-reglage', /CORRIGE/.test(await textePages(page)), 'la correction non appliquee est perdue');
@@ -174,7 +188,7 @@ async function main() {
     await page.click('#btn-restaurer-texte');
     await attendreApercu(page);
     check('editeur/restaurer', (await textePages(page)) === avant, 'le texte d\'origine n\'est pas restaure');
-    check('editeur/restaurer-panneau', (await page.inputValue('#editeur-texte')) === texte, 'le panneau n\'est pas restaure');
+    check('editeur/restaurer-panneau', (await lireEditeur(page)) === texte, 'le panneau n\'est pas restaure');
 
     // Fermer.
     await page.click('#btn-modifier-texte');
@@ -182,7 +196,7 @@ async function main() {
 
     // Nouveau document : le panneau repart de zero.
     await page.click('#btn-modifier-texte');
-    await page.fill('#editeur-texte', 'Autre texte.');
+    await ecrireEditeur(page, 'Autre texte.');
     await page.click('#btn-appliquer-texte');
     await attendreApercu(page);
     await deposer(page, '04-entete-pied-repetes.pdf');
@@ -192,6 +206,92 @@ async function main() {
     await ctx.close();
     check('editeur/aucune-erreur-js', errors.length === 0, errors.join(' | '));
     check('editeur/aucune-requete-reseau', requests.length === 0, requests.join(' '));
+  }
+
+  // --- Retour de la prof : ordre, interligne, alignement, puces ---------------------
+  console.log('\n=== editeur : ordre, interligne, mise en forme ===');
+  for (const fixture of ['01-hierarchie-styles-listes.pdf', '02-deux-colonnes.pdf', 'v3-decoupe-verticale.pdf', '07-mascottes.pdf']) {
+    const { ctx, page, errors } = await ouvrir(browser, fixture);
+    await page.click('#btn-modifier-texte');
+    const paras = (await lireEditeur(page)).split(/\n\n/).filter(Boolean);
+    const apercu = (await textePages(page)).replace(/\s+/g, ' ');
+    // Ordre : chaque paragraphe du panneau se retrouve dans l'apercu, dans le meme ordre.
+    let from = 0, desordre = null;
+    for (const para of paras) {
+      const cle = para.replace(/\s+/g, ' ').slice(0, 12);
+      const at = apercu.indexOf(cle, from);
+      if (at < 0) { desordre = cle; break; }
+      from = at + 1;
+    }
+    check(`ordre/${fixture}`, paras.length > 0 && desordre === null, `paragraphe hors ordre de l'apercu : "${desordre}"`);
+    await ctx.close();
+  }
+  {
+    const { ctx, page, errors } = await ouvrir(browser, '01-hierarchie-styles-listes.pdf');
+    await page.click('#btn-modifier-texte');
+    const ratio = () => page.evaluate(() => {
+      const p = document.querySelector('#editeur-texte p'); const cs = getComputedStyle(p);
+      return parseFloat(cs.lineHeight) / parseFloat(cs.fontSize);
+    });
+    check('interligne/editeur-1-5', Math.abs((await ratio()) - 1.5) < 0.01, `interligne de l'editeur = ${await ratio()}`);
+    await page.selectOption('#reglage-interligne', '1.75');
+    await attendreApercu(page);
+    check('interligne/editeur-suit-le-reglage', Math.abs((await ratio()) - 1.75) < 0.01, `interligne de l'editeur = ${await ratio()}`);
+    await page.selectOption('#reglage-interligne', '1.5');
+    await attendreApercu(page);
+    // Apres modification du texte, l'apercu garde l'interligne 1,5.
+    const paras = (await lireEditeur(page)).split(/\n\n/);
+    await ecrireEditeur(page, paras.map((t, i) => (i === 1 ? t + ' ajout' : t)).join('\n\n'));
+    await page.click('#btn-appliquer-texte');
+    await attendreApercu(page);
+    const pas = await page.evaluate(() => {
+      const tops = [...document.querySelectorAll('.page-apercu .ligne')].filter((l) => l.style.fontWeight !== 'bold')
+        .map((l) => ({ top: parseFloat(l.style.top), size: parseFloat(l.style.fontSize) }));
+      const gaps = [];
+      for (let i = 1; i < tops.length; i++) { const d = tops[i].top - tops[i - 1].top; if (d > 0 && d < tops[i].size * 2.2) gaps.push(d / tops[i].size); }
+      return Math.min(...gaps);
+    });
+    check('interligne/apercu-apres-modif', pas >= 1.45, `plus petit pas de ligne = ${pas} x corps`);
+
+    // Alignement et puces.
+    const nbParas = paras.length;
+    await selectionnerParagraphe(page, 1);
+    await page.click('#editeur-barre button[data-align="center"]');
+    await selectionnerParagraphe(page, 2);
+    await page.click('#editeur-barre button[data-marker="number"]');
+    await selectionnerParagraphe(page, 3);
+    await page.click('#editeur-barre button[data-marker="number"]');
+    await selectionnerParagraphe(page, 4);
+    await page.click('#editeur-barre button[data-marker="dash"]');
+    await selectionnerParagraphe(page, 5);
+    await page.click('#editeur-barre button[data-align="justify"]');
+    const etat = await page.evaluate(() => [...document.querySelectorAll('#editeur-texte p')].map((p) => [p.dataset.align, p.dataset.marker, p.dataset.label || '']));
+    check('mise-en-forme/panneau-centre', etat[1][0] === 'center', JSON.stringify(etat[1]));
+    check('mise-en-forme/panneau-numeros', etat[2][2] === '1.' && etat[3][2] === '2.', JSON.stringify([etat[2], etat[3]]));
+    check('mise-en-forme/panneau-tiret', etat[4][2] === '–', JSON.stringify(etat[4]));
+    await page.click('#btn-appliquer-texte');
+    await attendreApercu(page);
+    const rendu = await page.evaluate(() => [...document.querySelectorAll('.page-apercu .ligne')].map((l) => ({ t: l.textContent, left: parseFloat(l.style.left) })));
+    check('mise-en-forme/numero-affiche', rendu.some((l) => /^1\.\s/.test(l.t)) && rendu.some((l) => /^2\.\s/.test(l.t)), 'numeros absents de l\'apercu');
+    check('mise-en-forme/tiret-affiche', rendu.some((l) => /^–\s/.test(l.t)), 'tiret absent de l\'apercu');
+    const cle = paras[1].slice(0, 10);
+    const centre = rendu.find((l) => l.t.startsWith(cle));
+    const gauche = rendu.find((l) => l.t.startsWith(paras[0].slice(0, 10)));
+    check('mise-en-forme/centre-decale', centre && gauche && centre.left > gauche.left + 5, `centre ${centre && centre.left} vs gauche ${gauche && gauche.left}`);
+    // Ordre conserve apres application.
+    const apres = (await lireEditeur(page)).split(/\n\n/);
+    check('mise-en-forme/ordre-conserve', apres.length === nbParas && apres.every((t, i) => t.slice(0, 15) === (i === 1 ? paras[i] + ' ajout' : paras[i]).slice(0, 15)), 'ordre ou nombre de paragraphes change');
+    // Export : texte toujours du vrai texte.
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#btn-telecharger')]);
+    const doc = await pdfjsLib.getDocument({ data: new Uint8Array(fs.readFileSync(await dl.path())), disableFontFace: true, verbosity: 0 }).promise;
+    const tc = await (await doc.getPage(1)).getTextContent();
+    check('mise-en-forme/export-numero', tc.items.some((i) => /^1\./.test(i.str.trim())), 'numero absent du PDF');
+    // Retirer une puce en re-cliquant sur le meme bouton.
+    await selectionnerParagraphe(page, 4);
+    await page.click('#editeur-barre button[data-marker="dash"]');
+    check('mise-en-forme/retrait-puce', (await page.evaluate(() => document.querySelectorAll('#editeur-texte p')[4].dataset.marker)) === 'none', 'la puce n\'est pas retiree');
+    await ctx.close();
+    check('mise-en-forme/aucune-erreur-js', errors.length === 0, errors.join(' | '));
   }
 
   await browser.close();

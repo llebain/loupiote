@@ -210,6 +210,57 @@ async function run() {
     check('brut/vide', vide.blocks.length === 0, 'un texte vide doit donner un document vide');
   }
 
+  // --- Ordre de lecture, alignement, puces ----------------------------------------
+  console.log('\n=== ordre, alignement, puces ===');
+  {
+    const S = LE.clampSettings({});
+    const doc = TE.plainDocument([
+      { text: 'Titre', align: 'center' },
+      { text: 'Un mot de plus que la largeur disponible de la ligne ' .repeat(4) + 'fin.', align: 'justify' },
+      { text: 'Premier', marker: 'number' }, { text: 'Deuxième', marker: 'number' },
+      { text: 'Coupure', marker: 'none' }, { text: 'Encore', marker: 'number' },
+      { text: 'Tiret', marker: 'dash' }, { text: 'Puce', marker: 'bullet' },
+      { text: 'À droite', align: 'right' },
+    ]);
+    const lay = relayout(doc.extraction, doc.blocks, { fontSize: 20 });
+    const lines = allLines(ctx, lay);
+    const txt = (l) => l.segments.map((s) => s.text).join('');
+    const find = (t) => lines.find((l) => txt(l).startsWith(t));
+    const gauche = lines.find((l) => txt(l).startsWith('Coupure'));
+    check('format/centre', find('Titre').x > gauche.x + 20, `x centre ${find('Titre').x} vs ${gauche.x}`);
+    check('format/droite', find('À droite').x > find('Titre').x, 'texte a droite pas plus a droite que le centre');
+    check('format/numeros', !!find('1.') && !!find('2.') && !!lines.find((l) => /^1\.\s+Encore/.test(txt(l))), lines.map(txt).join(' | '));
+    check('format/tiret-puce', !!lines.find((l) => /^–\s+Tiret/.test(txt(l))) && !!lines.find((l) => /^•\s+Puce/.test(txt(l))), 'tiret ou puce absents');
+    // Justifie : les lignes non finales vont jusqu'au bord, la derniere non.
+    const justif = lines.filter((l) => /mot de plus|disponible|largeur|fin\./.test(txt(l)) && !l.isListItem);
+    const w = (l) => l.x + l.segments.reduce((a, sg) => a + sg.width, 0);
+    const pleines = justif.filter((l) => !l.isLastLine);
+    check('format/justifie', pleines.length > 0 && pleines.every((l) => Math.abs(w(l) - w(pleines[0])) < 0.5), pleines.map(w).join(','));
+    check('format/justifie-derniere-ligne', justif.filter((l) => l.isLastLine).every((l) => w(l) < w(pleines[0]) - 1), 'derniere ligne justifiee');
+    check('format/interligne', lines.length > 3 && lines.slice(1).every((l, i) => { const d = l.y - lines[i].y; return d <= 0 || d >= 20 * 1.5 - 0.01; }), 'pas de ligne sous 1,5');
+    const ex = ctx.PdfExport.createExportDoc(ctx.jsPDF, lay.pages[0].pageDims);
+    ctx.PdfExport.renderLayoutToPdf(ex, lay, 'format.pdf');
+    check('format/export', ex.output('arraybuffer').byteLength > 1000, 'export vide');
+
+    // Document structure : ordre de lecture de la mise en page, mise en forme reportee.
+    const r = await runFullPipeline(ctx, FIX('02-deux-colonnes.pdf'), { fontSize: 20 });
+    const all = r.extraction.blocks;
+    const ordre = r.layout.blockOrder;
+    check('ordre/blockOrder', Array.isArray(ordre) && ordre.length > 0, 'layout.blockOrder absent');
+    const vis = TE.visibleBlocks(all, S, ordre);
+    const rank = new Map(ordre.map((b, k) => [b, k]));
+    check('ordre/visibles-dans-l-ordre-de-la-mise-en-page', vis.every((b, i) => i === 0 || (rank.get(vis[i - 1]) ?? -1) <= (rank.get(b) ?? Infinity)), 'ordre different');
+    const inverse = TE.visibleBlocks(all, S, ordre.slice().reverse());
+    check('ordre/suit-l-ordre-donne', vis.length < 2 || inverse[0] === vis[vis.length - 1], 'order ignore');
+    const paras = vis.map(TE.blockParagraph);
+    const centre = paras.map((p, i) => (i === 1 ? { ...p, align: 'center', marker: 'bullet' } : p));
+    const ed = TE.applyEdit(all, centre, S, ordre);
+    const b1 = ed.find((b) => b.edited && b.align === 'center');
+    check('format/report-bloc', !!b1 && b1.markerText === '•' && TE.blockText(b1) === TE.blockText(vis[1]), 'alignement / puce non reportes sur le bloc');
+    check('format/sans-changement', TE.applyEdit(all, paras, S, ordre).every((b, i) => b === all[i]), 'un texte inchange modifie le modele');
+    check('format/original-intact', !all.some((b) => b.align || b.markerText !== undefined), 'bloc d\'origine modifie');
+  }
+
   origLog(`\n${'='.repeat(60)}`);
   origLog(`${pass} test(s) edition reussis, ${fail} echec(s)`);
   if (fail) { origLog('\nEchecs :'); for (const f of failures) origLog('  - ' + f); process.exitCode = 1; }

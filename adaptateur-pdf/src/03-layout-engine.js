@@ -645,6 +645,28 @@
     return anyText;
   }
 
+  // Alignement d'une ligne dans `avail` (editeur de texte) : centre / droite
+  // = decalage de la ligne ; justifie = chaque blanc de la ligne s'elargit
+  // d'autant (jamais sur la derniere ligne du paragraphe, comme un
+  // traitement de texte). Rend { dx, segments }.
+  function alignLine(line, align, avail, isLastLine, measure) {
+    const slack = avail - line.width;
+    if (align === 'center') return { dx: Math.max(0, slack / 2), segments: line.segments };
+    if (align === 'right') return { dx: Math.max(0, slack), segments: line.segments };
+    if (align !== 'justify' || isLastLine || slack <= 0.01) return { dx: 0, segments: line.segments };
+    const gaps = line.segments.reduce((n, s) => n + (s.text.match(/ /g) || []).length, 0);
+    if (!gaps) return { dx: 0, segments: line.segments };
+    const extra = slack / gaps;
+    const out = [];
+    for (const seg of line.segments) {
+      for (const part of seg.text.split(/( +)/).filter((p) => p !== '')) {
+        const isGap = /^ +$/.test(part);
+        out.push({ ...seg, text: part, width: measure(part, seg.style) + (isGap ? extra * part.length : 0), gap: isGap || undefined });
+      }
+    }
+    return { dx: 0, segments: out };
+  }
+
   // Reflow les runs d'une liste de blocs dans une largeur donnee, retourne
   // des lignes au meme format que computeLayout ({y relatif, x relatif,
   // segments, sizePt, isHeading, isListItem}) plus la hauteur totale.
@@ -707,14 +729,18 @@
         continue;
       }
       const isHeading = block.type === 'h1' || block.type === 'h2' || block.type === 'h3';
-      const isListItem = block.type === 'li';
+      // `markerText` (editeur de texte) : '' = pas de puce, sinon le
+      // marqueur choisi (• – 1.) ; absent = comportement d'origine.
+      const marker = block.markerText !== undefined ? block.markerText : (block.type === 'li' ? '•' : '');
+      const isListItem = marker !== '';
       const sizePt = isHeading ? bodySize * HEADING_FACTORS[block.type] : bodySize;
       const lineGap = isHeading ? sizePt * settings.lineHeight : bodyLineGap;
       let runs = runsForDisplay(block.runs, settings);
       let indent = 0;
       if (isListItem) {
         indent = sizePt * 1.2;
-        runs = [{ text: '•  ', bold: false, italic: false }, ...runs];
+        if (marker.length > 1) indent = Math.max(indent, measurer.widthOf(marker + '  ', sizePt, 'normal'));
+        runs = [{ text: marker + '  ', bold: false, italic: false }, ...runs];
       }
       let iconBottom = null;
       if (pendingIcon) {
@@ -738,8 +764,12 @@
       // `avgCharsPerLine` (ne doit compter que les lignes de retour
       // automatique) et au harnais visuel, qui doit appliquer exactement la
       // meme definition sur le DOM rendu (cf. visual.mjs).
+      const align = block.align || 'left';
       wrapped.forEach((l, wi) => {
-        lines.push({ y: y + lineGap * 0.8, x: indent, segments: l.segments, sizePt, isHeading, isListItem, isLastLine: wi === wrapped.length - 1 });
+        const isLastLine = wi === wrapped.length - 1;
+        const placed = alignLine(l, align, width - indent, isLastLine,
+          (t, st) => applySpacingToWidth(measurer.widthOf(t, sizePt, st), t, settings));
+        lines.push({ y: y + lineGap * 0.8, x: indent + placed.dx, segments: placed.segments, sizePt, isHeading, isListItem, isLastLine });
         y += lineGap;
       });
       if (iconBottom !== null) y = Math.max(y, iconBottom);
@@ -934,6 +964,7 @@
         // (pas seulement le sommet), necessaire au regroupement par bande
         // verticale de l'ordre de lecture, cf. plus bas.
         srcTopY: box.y1, srcBottomY: box.y0, srcLeftX: box.x0, srcCenterX: (box.x0 + box.x1) / 2,
+        srcBlocks: boxContents[bi],
         lines: lines.map((l) => ({ ...l, x: l.x + boxPadding })),
         // ADDENDUM 6, Z12, C1 : images de la boite, memes coordonnees
         // relatives + rembourrage que les lignes ci-dessus.
@@ -1065,6 +1096,7 @@
         // srcBottomY/srcLeftX (ADDENDUM 6, Z12, A2) : cf. commentaire sur
         // l'item 'box' ci-dessus.
         srcTopY: table.y1, srcBottomY: table.y0, srcLeftX: table.x0, srcCenterX: (table.x0 + table.x1) / 2,
+        srcBlocks: grid.flat().flatMap((c) => c.blocks),
         headerRow,
         cellPadding: cp,
       };
@@ -1174,7 +1206,8 @@
           const cap = reflowBlocksInWidth([{ type: 'h2', runs: [{ text: captionText, bold: true, color: titleBlock && titleBlock.runs[0] ? titleBlock.runs[0].color : null }] }],
             maxW, tSettings, measurer, 0);
           items.push({ kind: 'flow', x: MARGIN_MM * MM_TO_PT, y: 0, width: maxW, height: cap.height, lines: cap.lines,
-            srcTopY: table.y1, srcBottomY: table.y0, srcLeftX: order - 0.005, srcCenterX: (table.x0 + table.x1) / 2, landscapeGroup: groupId });
+            srcTopY: table.y1, srcBottomY: table.y0, srcLeftX: order - 0.005, srcCenterX: (table.x0 + table.x1) / 2, landscapeGroup: groupId,
+            srcBlocks: titleBlock ? [titleBlock] : [] });
         }
         const gi = buildTableItem(table, grid, cols, tSettings, maxW, true, true, g.rowsIdx);
         gi.srcLeftX = order;
@@ -1198,7 +1231,8 @@
         const rect = toOutputRect(block.bbox, widthRatio, pageHeightSrc);
         items.push({ kind: 'image', x: margin, y: rect.y, width: usableWidth,
           height: usableWidth * (rect.height / rect.width), src: block.dataUrl,
-          srcTopY: block.bbox.y1, srcBottomY: block.bbox.y0, srcLeftX: block.bbox.x0, srcCenterX: (block.bbox.x0 + block.bbox.x1) / 2 });
+          srcTopY: block.bbox.y1, srcBottomY: block.bbox.y0, srcLeftX: block.bbox.x0, srcCenterX: (block.bbox.x0 + block.bbox.x1) / 2,
+          srcBlocks: [block] });
         continue;
       }
       const { lines, height } = reflowBlocksInWidth([block], usableWidth, settings, measurer, 0);
@@ -1215,6 +1249,7 @@
         // partager une.
         srcTopY: block.bbox ? block.bbox.y1 : 0, srcBottomY: block.bbox ? block.bbox.y0 : 0, srcLeftX: 0,
         srcCenterX: block.bbox ? (block.bbox.x0 + block.bbox.x1) / 2 : undefined,
+        srcBlocks: [block],
       });
     }
 
@@ -1330,7 +1365,14 @@
       }
     }
 
+    // Ordre de lecture reel des blocs de cette page source (celui des items
+    // ci-dessus, avant pagination) : l'editeur de texte (04b) le suit, pour
+    // que le texte propose a la relecture soit dans l'ordre de la feuille.
+    const blockOrder = [];
+    for (const it of orderedItems) if (it.srcBlocks) blockOrder.push(...it.srcBlocks);
+
     return {
+      blockOrder,
       pages: outPages.map((pageItems) => ({
         items: pageItems,
         // v0.3 (E4) : une page de tableau large est en A4 paysage, quel
@@ -1934,6 +1976,7 @@
     const pageCount = extraction.pageSizes.length;
     const dims = pageDimsPt(settings.orientation);
     const pages = [];
+    const blockOrder = [];
     let totalCharSamples = 0, totalLineSamples = 0;
 
     for (let p = 0; p < pageCount; p++) {
@@ -1943,8 +1986,9 @@
       // ADDENDUM 6, Z9 : computeBlockLayout() pagine desormais lui-meme
       // (une page source peut produire plusieurs pages de sortie A4) --
       // on aplatit son resultat dans la liste globale de pages du document.
-      const { pages: sourcePageOutputs } = computeBlockLayout(pageBlocks, pageShapesForPage, pageSizeForPage, settings, measurer);
+      const { pages: sourcePageOutputs, blockOrder: pageOrder } = computeBlockLayout(pageBlocks, pageShapesForPage, pageSizeForPage, settings, measurer);
       pages.push(...sourcePageOutputs);
+      blockOrder.push(...pageOrder);
 
       // Flux libre ET boites (pleine largeur de page depuis A1, Z12) sont
       // pertinents pour l'avertissement "lignes trop courtes" -- SEULES les
@@ -1975,6 +2019,7 @@
 
     return {
       pages,
+      blockOrder,
       settings,
       theme: CONTRAST_THEMES[settings.contrast],
       avgCharsPerLine,

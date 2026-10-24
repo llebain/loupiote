@@ -177,18 +177,35 @@ main {
 #editeur h2 { margin: 0.2em 0; }
 #editeur fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 0 0 0.8em 0; padding: 0.4em 0.8em; }
 #editeur label { font-weight: 600; }
+.editeur-label { font-weight: 600; margin: 0.4em 0 0.3em; }
+#editeur-barre { display: flex; flex-wrap: wrap; gap: 0.4em; align-items: center; margin: 0 0 0.5em; }
+#editeur-barre button { min-height: 44px; padding: 0.3em 0.7em; }
+#editeur-barre button[aria-pressed="true"] { outline: 3px solid var(--border); font-weight: 700; }
+.editeur-separateur { width: 1px; align-self: stretch; background: var(--border); margin: 0 0.2em; }
+/* Interligne de l'editeur = interligne choisi pour le document (1,5 au
+   minimum, jamais en dessous) : --editeur-interligne est fixe par 05-main.js. */
 #editeur-texte {
   display: block;
   width: 100%;
+  box-sizing: border-box;
   font-family: "Luciole", sans-serif;
   font-size: 1.1em;
-  line-height: 1.5;
+  line-height: var(--editeur-interligne, 1.5);
   padding: 0.6em;
   border: 2px solid var(--border);
   border-radius: 8px;
-  resize: vertical;
   min-height: 12em;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: #fff;
+  color: #000;
 }
+#editeur-texte p { margin: 0 0 0.6em; line-height: inherit; min-height: 1.5em; }
+#editeur-texte p[data-align="left"] { text-align: left; }
+#editeur-texte p[data-align="center"] { text-align: center; }
+#editeur-texte p[data-align="right"] { text-align: right; }
+#editeur-texte p[data-align="justify"] { text-align: justify; }
+#editeur-texte p[data-label]::before { content: attr(data-label) "\00a0\00a0"; }
 .editeur-actions { display: flex; flex-wrap: wrap; gap: 0.6em; margin: 0.8em 0 0.4em; }
 #editeur-etat { min-height: 1.4em; font-weight: 600; margin: 0.2em 0; }
 
